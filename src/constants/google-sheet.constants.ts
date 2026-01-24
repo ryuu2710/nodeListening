@@ -1,0 +1,30 @@
+export const GOOGLE_SHEET_AMAZON_PRODUCTS_HEADERS = {
+  product: [
+    "ASIN",
+    "Tiêu đề sản phẩm",
+    "Thương hiệu",
+    "Nhà bán lẻ",
+    "Tình trạng kho",
+    "Điểm (sao)",
+    "Tổng lượt ĐG",
+    "Là Amazon Choice?",
+    "Là Best Seller?",
+    "Lượt mua T.Trước",
+    "Danh mục (Camel)",
+    "Ngày cào",
+  ],
+  feedback: [
+    "ASIN",
+    "Tên người dùng",
+    "Điểm (sao)",
+    "Tiêu đề Feedback",
+    "Nội dung Feedback",
+    "Quốc gia",
+    "Ngày đăng",
+    "Đã xác minh?",
+    "Lượt hữu ích",
+  ],
+  rank: ["ASIN", "Thứ hạng", "Danh mục"],
+  performance: ["ASIN", "Thời điểm cào", "Tổng TG (giây)", "TG trang chính (giây)", "TG Camel (giây)", "TG Feedbacks (giây)"],
+};
+export const GOOGLE_SHEET_AMAZON_PRODUCTS_SHEET_NAMES = ["Sản Phẩm", "Feedbacks", "Xếp Hạng", "Hiệu suất"];

@@ -1,0 +1,10 @@
+node_modules
+.vscode
+dist
+.env
+.nvmrc
+.prettierignore
+.prettierrc
+*.json
+facebook_group_posts.json
+google-credentials.json
