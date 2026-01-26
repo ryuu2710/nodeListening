@@ -24,19 +24,13 @@ export default class ShopeeProductController implements BaseController {
         req: Request,
         res: Response,
         next: NextFunction,
-    ): Promise<void> => { // Khai báo rõ ràng kiểu trả về là Promise<void>
-        console.log("Hello")
+    ): Promise<void> => {
         try {
-            // Gọi phương thức service và đợi nó hoàn thành.
-            // Phương thức service nên tự xử lý việc gửi phản hồi (res.json(), res.send())
-            // hoặc gọi next() nếu có lỗi mà nó không tự xử lý.
             const url = req.body.url as string;
             const data = await this.productService.collectRecommendedProducts(url);
             
             res.json({ data });
         } catch (error) {
-            // Nếu có lỗi xảy ra trong quá trình gọi service (và service không bắt),
-            // chuyển lỗi đó cho middleware xử lý lỗi của Express.
             next(error);
         }
     };

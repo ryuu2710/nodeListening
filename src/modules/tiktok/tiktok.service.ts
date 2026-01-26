@@ -136,13 +136,13 @@ export default class TiktokScraperService {
       if (batchCommentItems.length > 0) {
         logger.info("🤖 Đang gửi dữ liệu qua AI để lọc Lead & Trích xuất SĐT...");
 
-        // 1. Minify Data (Tiết kiệm Token)
+        // minify Data (saving token)
         const minifiedData = batchCommentItems.map((item) => ({
           id: item.user.uniqueId,
           txt: item.text,
         }));
 
-        // 2. Batch Processing (50 items/batch)
+        // batch processing (50 items/batch)
         const batchSize = 50;
 
         for (let i = 0; i < minifiedData.length; i += batchSize) {
@@ -162,7 +162,7 @@ export default class TiktokScraperService {
           try {
             const aiResults = await this.callOpenAI(prompt);
 
-            // LOG DEBUG QUAN TRỌNG: Xem AI trả về bao nhiêu lead
+            // how many lead after classified
             logger.info(`🔍 Batch ${i}: AI found ${aiResults.length} leads.`);
 
             if (aiResults && Array.isArray(aiResults)) {
@@ -191,9 +191,7 @@ export default class TiktokScraperService {
         }
       }
 
-      logger.info(`💰 KẾT QUẢ: Tìm thấy ${finalExcelRows.length} Leads chất lượng để đổ vào Excel.`);
-      console.table(finalExcelRows); // In ra bảng đẹp check chơi
-
+      logger.info(`Resul: found ${finalExcelRows.length} Leads before push to excel.`);
       return finalExcelRows;
     } catch (error) {
       console.error({ msg: "Scrape failed", error });

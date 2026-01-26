@@ -15,18 +15,41 @@ export default class FbController implements BaseController {
   public readonly router: Router = Router();
 
   constructor(
-    @inject(FbScraperService) private readonly fbScraperService: FbScraperService, 
-    @inject(BrandInsightService) private readonly brandInsightService: BrandInsightService) {
+    @inject(FbScraperService)
+    private readonly fbScraperService: FbScraperService,
+    @inject(BrandInsightService)
+    private readonly brandInsightService: BrandInsightService,
+  ) {
     this.initRoutes();
   }
 
   private initRoutes = (): void => {
-    this.router.route(`${this.path}/scrape/:projectId`).post(this.scrapeFacebookGroup);
+    this.router
+      .route(`${this.path}/scrape/:projectId`)
+      .post(this.scrapeFacebookGroup);
+    this.router
+      .route(`${this.path}/scrape/comments`)
+      .get(this.scrapeCommentsByGroupIdAndPostId);
     this.router.route(`${this.path}/scrape/build-url`).get(this.buildURL);
-    this.router.route(`${this.path}/brand-insight`).post(this.generateBrandInsightReport);
+    this.router
+      .route(`${this.path}/brand-insight`)
+      .post(this.generateBrandInsightReport);
   };
 
-  private scrapeFacebookGroup = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  private scrapeCommentsByGroupIdAndPostId = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const data = await this.fbScraperService.scrapeCommentsOfPost();
+    res.status(200).json(data);
+  };
+
+  private scrapeFacebookGroup = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     const { projectId } = req.params;
     const { groupId, scrollTimes, keyword, year } = req.body as ScrapeRequest;
     // const token: string = getTokenFromRequest(req)
@@ -40,14 +63,23 @@ export default class FbController implements BaseController {
       console.log(`Receive scraping requirement for group: ${groupId}`);
       // const result = await this.fbScraperService.scrapeGroupPosts(projectId, groupId, scrollTimes, token);
       const result: ScrapeResultGenParams<SocialFbMention[]> =
-        await this.fbScraperService.scrapeGroupPostsByFilterParams(projectId, groupId, scrollTimes, keyword, year);
+        await this.fbScraperService.scrapeGroupPostsByFilterParams(
+          "",
+          groupId,
+          scrollTimes,
+          keyword,
+          year,
+        );
 
       res.status(200).json({
         message: `Successfully collect ${result.count} posts from group ${groupId}.`,
         ...result,
       });
     } catch (error) {
-      console.error("Error for request process handling during scraping:", error);
+      console.error(
+        "Error for request process handling during scraping:",
+        error,
+      );
       res.status(500).json({
         message: "Occured unexpected error during scraping.",
         error: error instanceof Error ? error.message : String(error),
@@ -55,28 +87,35 @@ export default class FbController implements BaseController {
     }
   };
 
-  private generateBrandInsightReport = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  private generateBrandInsightReport = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
-      // Lấy config từ Body
       const config = req.body;
-
-      // Validate cơ bản
-      if (!config.brandKeyword || !config.targetGroups || config.targetGroups.length === 0) {
-        res.status(400).json({ 
-          message: "Invalid Config. Require 'brandKeyword' and 'targetGroups'." 
+      if (
+        !config.brandKeyword ||
+        !config.targetGroups ||
+        config.targetGroups.length === 0
+      ) {
+        res.status(400).json({
+          message: "Invalid Config. Require 'brandKeyword' and 'targetGroups'.",
         });
         return;
       }
 
-      console.log(`📊 Generating Brand Insight Report for: ${config.brandKeyword}`);
+      console.log(
+        `📊 Generating Brand Insight Report for: ${config.brandKeyword}`,
+      );
 
-      const report: BrandInsightReport | null = await this.brandInsightService.generateReport(config);
+      const report: BrandInsightReport | null =
+        await this.brandInsightService.generateReport(config);
 
       res.status(200).json({
         message: "Brand Insight Report generated successfully.",
-        data: report
+        data: report,
       });
-
     } catch (error) {
       console.error("Error generating brand insight report:", error);
       res.status(500).json({
@@ -87,6 +126,8 @@ export default class FbController implements BaseController {
   };
 
   private buildURL(req: Request, res: Response, next: NextFunction) {
-    res.status(200).json(buildFbGroupSearchUrl("1166454660883635", "xây kênh", 2026))
+    res
+      .status(200)
+      .json(buildFbGroupSearchUrl("1166454660883635", "xây kênh", 2026));
   }
 }

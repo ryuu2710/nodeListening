@@ -11,6 +11,7 @@ import {
   FB_ENDPOINT_GROUP_KEY,
   FB_GROUP_API_REQUEST_FRIENDLY_NAME,
   FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME,
+  FB_POST_COMMENT_API_REQUEST_FRIENDLY_NAME,
   HTTP_POST_METHOD,
   INFO_ENV,
   PPT_REQUEST_KEY,
@@ -22,12 +23,24 @@ import {
 } from "#constants/index.js";
 import { Browser, Page } from "puppeteer";
 import { getMyCustomRemoteBrowser } from "#share/browser.js";
-import { FacebookFetchOptions, ScrapePerformanceContextParams, ScrapeResultGenParams, ScrapeResultParams } from "#types/index.js";
+import {
+  FacebookFetchOptions,
+  ScrapePerformanceContextParams,
+  ScrapeResultGenParams,
+  ScrapeResultParams,
+} from "#types/index.js";
 import { BuildFbRequestOptionsForCallApi, WaitNextGraphQL } from "#share/fb.js";
-import { fetchAndProcessBatchGqlData, getCookiesFromCurrentPage } from "#share/api.js";
+import {
+  fetchAndProcessBatchGqlData,
+  getCookiesFromCurrentPage,
+} from "#share/api.js";
 import { FormatVnTimeMsg } from "#share/display.js";
-import { SocialFbMention } from "./fb.types";
-import { extractPostsFromRawJson, normalizeFacebookPost } from "./fb.clean";
+import { SocialFbComment, SocialFbMention } from "./fb.types";
+import {
+  extractCommentFromRawJson,
+  extractPostsFromRawJson,
+  normalizeFacebookPost,
+} from "./fb.clean";
 import { buildFbGroupSearchUrl } from "./fb.builder";
 
 const logger = pino({
@@ -70,6 +83,7 @@ export default class FbScraperService {
     const scrapeStartTime = Date.now();
     const cleanedPosts: SocialFbMention[] = [];
 
+    // Open browser
     try {
       browser = await getMyCustomRemoteBrowser();
       const page: Page = await browser.newPage();
@@ -78,6 +92,8 @@ export default class FbScraperService {
 
       // Open CDP Network domain to get postData fallback
       const client = await page.target().createCDPSession();
+
+      // set the viewport of browser
 
       const { windowId } = await client.send("Browser.getWindowForTarget");
       await client.send("Browser.setWindowBounds", {
@@ -95,6 +111,7 @@ export default class FbScraperService {
         deviceScaleFactor: 1,
       });
 
+      // prebuild the url
       let targetURL = "";
       if (keyword) {
         targetURL = buildFbGroupSearchUrl(groupId.toString(), keyword, year);
@@ -114,14 +131,21 @@ export default class FbScraperService {
       if (keyword) {
         try {
           logger.info("Checking the status of the 'Recent Posts' button...");
-          const toggleSelector = 'input[role="switch"][aria-label="Recent Posts"]';
-          const toggleInput = await page.waitForSelector(toggleSelector, { timeout: 5000 }).catch(() => null);
+          const toggleSelector =
+            'input[role="switch"][aria-label="Recent Posts"]';
+          const toggleInput = await page
+            .waitForSelector(toggleSelector, { timeout: 5000 })
+            .catch(() => null);
 
           if (toggleInput) {
-            const isChecked = await toggleInput.evaluate((el) => el.getAttribute("aria-checked") === "true");
+            const isChecked = await toggleInput.evaluate(
+              (el) => el.getAttribute("aria-checked") === "true",
+            );
 
             if (!isChecked) {
-              logger.info("The button is currently DISABLED. Click to turn it on...");
+              logger.info(
+                "The button is currently DISABLED. Click to turn it on...",
+              );
               await toggleInput.evaluate((el) => (el as HTMLElement).click());
 
               await new Promise((r) => setTimeout(r, 3000));
@@ -133,39 +157,64 @@ export default class FbScraperService {
             logger.warn("'Recent Posts' button not found in DOM.");
           }
         } catch (e) {
-          logger.warn("Error when using the Recent Posts button (Skip to continue):", e as any);
+          logger.warn(
+            "Error when using the Recent Posts button (Skip to continue):",
+            e as any,
+          );
         }
       }
 
       for (let i = 0; i < scrollTimes; i++) {
+        // capture network GQL requests
         const networkRacePromise = Promise.race([
-          WaitNextGraphQL(client, FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME).then((res) => ({ status: "SUCCESS", data: res })),
-          new Promise((resolve) => setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 10000)),
+          WaitNextGraphQL(
+            client,
+            FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME,
+          ).then((res) => ({ status: "SUCCESS", data: res })),
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 10000),
+          ),
         ]);
 
+        // immitate human scroll behaviour
         await this.humanScroll(page);
 
         await page.evaluate(() => {
-          window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth",
+          });
         });
 
-        const result = (await networkRacePromise) as { status: string; data: any };
+        const result = (await networkRacePromise) as {
+          status: string;
+          data: any;
+        };
 
         if (result.status === "TIMEOUT") {
           logger.warn(`Scroll ${i + 1}: Timeout - no data found.`);
           break;
         }
 
-        const {headers, bodyRaw} = result.data;
-        logger.info(`Snapshot request '${FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME}'`);
+        const { headers, bodyRaw } = result.data;
+        logger.info(
+          `Snapshot request '${FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME}'`,
+        );
 
         const cookieStr = await getCookiesFromCurrentPage(page);
-        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions = await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-        const processedBatchFbData = await fetchAndProcessBatchGqlData(fbRequestOptionsBuilderForCallApi, logger);
+        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
+          await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
+        const processedBatchFbData = await fetchAndProcessBatchGqlData(
+          fbRequestOptionsBuilderForCallApi,
+          logger,
+        );
 
         if (processedBatchFbData) {
           try {
-            const jsonData = typeof processedBatchFbData === "string" ? JSON.parse(processedBatchFbData) : processedBatchFbData;
+            const jsonData =
+              typeof processedBatchFbData === "string"
+                ? JSON.parse(processedBatchFbData)
+                : processedBatchFbData;
             const rawStoriesAccessor = extractPostsFromRawJson(jsonData);
 
             if (rawStoriesAccessor.length > 0) {
@@ -173,18 +222,29 @@ export default class FbScraperService {
                 .map((story: any) => normalizeFacebookPost(story))
                 .filter((post): post is SocialFbMention => post !== null);
               cleanedPosts.push(...batchCleanPosts);
-              logger.info(`Cleaned and added the ${batchCleanPosts.length} posts.`);
+              logger.info(
+                `Cleaned and added the ${batchCleanPosts.length} posts.`,
+              );
               await page.evaluate(() => {
-                window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+                window.scrollTo({
+                  top: document.body.scrollHeight,
+                  behavior: "smooth",
+                });
               });
             }
           } catch (parseError) {
-            logger.error("Error parsing batch GraphQL data:", parseError as any);
+            logger.error(
+              "Error parsing batch GraphQL data:",
+              parseError as any,
+            );
           }
         }
 
         await page.evaluate(() => {
-          window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth",
+          });
         });
       }
 
@@ -193,7 +253,9 @@ export default class FbScraperService {
 
       logger.info(`Start time scraping: ${FormatVnTimeMsg(scrapeStartTime)}`);
       logger.info(`End time scraping: ${FormatVnTimeMsg(scrapeEndTime)}`);
-      logger.info(`Total data collection time: ${(scrapeDurationInMs / 1000).toFixed(2)} seconds.`);
+      logger.info(
+        `Total data collection time: ${(scrapeDurationInMs / 1000).toFixed(2)} seconds.`,
+      );
 
       const scrapeResult: ScrapeResultGenParams<SocialFbMention[]> = {
         performance: {
@@ -206,11 +268,11 @@ export default class FbScraperService {
             mainProductPageMs: scrapeDurationInMs,
             camelPageMs: 0,
             feedbackPagesMs: 0,
-            finalProcessingMs: 0
-          }
+            finalProcessingMs: 0,
+          },
         },
         count: cleanedPosts.length,
-        data: cleanedPosts
+        data: cleanedPosts,
       };
 
       return scrapeResult;
@@ -219,6 +281,144 @@ export default class FbScraperService {
     } finally {
       if (browser) {
         logger.info("Done, closed browser connection.");
+        await browser.disconnect();
+      }
+    }
+  }
+
+  public async scrapeCommentsOfPost() {
+    const targetURL =
+      "https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/";
+    let browser: Browser | null = null;
+    const scrapeStartTime = Date.now();
+    const cleanedComments: SocialFbComment[] = [];
+
+    // Open browser
+    try {
+      browser = await getMyCustomRemoteBrowser();
+      const page: Page = await browser.newPage();
+      await page.setRequestInterception(true);
+      page.on(PPT_REQUEST_KEY, (req) => req.continue());
+
+      // Open CDP Network domain to get postData fallback
+      const client = await page.target().createCDPSession();
+
+      // set the viewport of browser
+
+      const { windowId } = await client.send("Browser.getWindowForTarget");
+      await client.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: "fullscreen" },
+      });
+
+      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
+
+      await page.setViewport({
+        width: 0,
+        height: 0,
+        isMobile: false,
+        hasTouch: false,
+        deviceScaleFactor: 1,
+      });
+
+      await page.goto(targetURL, {
+        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
+        timeout: PPT_TIMEOUT_DEFAULT,
+      });
+
+      // toggle button from "Most Relevant" -> "All Comments"
+      this.switchCommentsViewMode(page);
+
+      for (let i = 0; i < 20; i++) {
+        const networkPromises = Promise.race([
+          WaitNextGraphQL(client, FB_POST_COMMENT_API_REQUEST_FRIENDLY_NAME).then(
+            (res) => ({
+              status: "SUCCESS",
+              data: res,
+            }),
+          ),
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
+          ),
+        ]);
+
+        await page.evaluate(async () => {
+          const dialog = document.querySelector('div[role="dialog"]');
+          let target = dialog as HTMLElement;
+
+          if (dialog) {
+            const scrollableChild = Array.from(
+              dialog.querySelectorAll("*"),
+            ).find((el) => {
+              const e = el as HTMLElement;
+              return (
+                e.scrollHeight > e.clientHeight &&
+                ["auto", "scroll"].includes(
+                  window.getComputedStyle(e).overflowY,
+                )
+              );
+            });
+            if (scrollableChild) target = scrollableChild as HTMLElement;
+          } else {
+            target = document.documentElement; // Fallback window
+          }
+
+          target.scrollBy({ top: 500, behavior: "smooth" });
+
+          if (target.scrollTop + target.clientHeight < target.scrollHeight) {
+            setTimeout(() => {
+              target.scrollTop = target.scrollHeight;
+            }, 500);
+          }
+        });
+
+        const result = (await networkPromises) as { status: string; data: any };
+        if (result.status === "TIMEOUT" || !result.data) {
+          console.warn(
+            `Loop ${i + 1}: No new GraphQL request captured (Timeout).`,
+          );
+          continue;
+        }
+
+        const { headers, bodyRaw } = result.data;
+        console.log(`Captured ${FB_POST_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+
+        const cookieStr = await getCookiesFromCurrentPage(page);
+        const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
+          headers,
+          bodyRaw,
+          cookieStr,
+        );
+        const processedBatchData = await fetchAndProcessBatchGqlData(
+          fbRequestOptions,
+          logger,
+        );
+
+        if (processedBatchData) {
+          try {
+            // Parse to json node
+            const jsonData =
+              typeof processedBatchData === "string"
+                ? JSON.parse(processedBatchData)
+                : processedBatchData;
+
+            console.log(`Cleaned comment batch successfully.`);
+
+            // Parse to json dto
+            const batchComments: SocialFbComment[] = extractCommentFromRawJson(jsonData);
+            batchComments.map((data) => cleanedComments.push(data));
+          } catch (parseError) {
+            console.error("Error parsing GraphQL data:", parseError);
+          }
+        }
+      }
+
+      console.log(`\nCollected ${cleanedComments.length} comments`);
+      return cleanedComments;
+    } catch (error) {
+      console.error("Error in scrapeCommentsOfPost:", error);
+    } finally {
+      if (browser) {
         await browser.disconnect();
       }
     }
@@ -274,16 +474,26 @@ export default class FbScraperService {
           window.scrollTo({ top: document.body.scrollHeight });
         });
 
-        const { headers, bodyRaw } = await WaitNextGraphQL(client, FB_GROUP_API_REQUEST_FRIENDLY_NAME);
+        const { headers, bodyRaw } = await WaitNextGraphQL(
+          client,
+          FB_GROUP_API_REQUEST_FRIENDLY_NAME,
+        );
         logger.info(`Bắt được request '${FB_GROUP_API_REQUEST_FRIENDLY_NAME}'`);
 
         const cookieStr = await getCookiesFromCurrentPage(page);
-        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions = await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-        const processedBatchFbData = await fetchAndProcessBatchGqlData(fbRequestOptionsBuilderForCallApi, logger);
+        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
+          await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
+        const processedBatchFbData = await fetchAndProcessBatchGqlData(
+          fbRequestOptionsBuilderForCallApi,
+          logger,
+        );
 
         if (processedBatchFbData) {
           try {
-            const jsonData = typeof processedBatchFbData === "string" ? JSON.parse(processedBatchFbData) : processedBatchFbData;
+            const jsonData =
+              typeof processedBatchFbData === "string"
+                ? JSON.parse(processedBatchFbData)
+                : processedBatchFbData;
 
             const edges = jsonData?.data?.node?.group_feed?.edges || [];
             if (Array.isArray(edges)) {
@@ -293,10 +503,15 @@ export default class FbScraperService {
 
               cleanedPosts.push(...batchCleanPosts);
 
-              logger.info(`Đã làm sạch và thêm ${batchCleanPosts.length} bài viết.`);
+              logger.info(
+                `Đã làm sạch và thêm ${batchCleanPosts.length} bài viết.`,
+              );
             }
           } catch (parseError) {
-            logger.error("Lỗi khi parse batch GraphQL data:", parseError as any);
+            logger.error(
+              "Lỗi khi parse batch GraphQL data:",
+              parseError as any,
+            );
           }
         }
       }
@@ -306,7 +521,9 @@ export default class FbScraperService {
 
       logger.info(`Thời gian bắt đầu: ${FormatVnTimeMsg(scrapeStartTime)}`);
       logger.info(`Thời gian kết thúc: ${FormatVnTimeMsg(scrapeEndTime)}`);
-      logger.info(`Tổng thời gian thu thập dữ liệu: ${(scrapeDurationInMs / 1000).toFixed(2)} giây.`);
+      logger.info(
+        `Tổng thời gian thu thập dữ liệu: ${(scrapeDurationInMs / 1000).toFixed(2)} giây.`,
+      );
 
       var scrapePerformanceContextInfo: ScrapePerformanceContextParams = {
         scrapeStartTime,
@@ -330,14 +547,61 @@ export default class FbScraperService {
     }
   }
 
-  public async sendToGoServer(projectId: string, data: ScrapeResultParams, token: string) {
-    logger.info(`🚀 Bắt đầu gửi ${data.scrapeData.length} batch dữ liệu tới server Golang...`);
+  private async switchCommentsViewMode(page: Page) {
+    try {
+      const triggerBtnXPath =
+        "//div[@role='button'][@aria-haspopup='menu'][.//span[contains(text(), 'Most relevant')]]";
+      const menuOptionXPath =
+        "//div[@role='menuitem']//span[contains(text(), 'All comments')]";
+
+      // 2. Check "Most relevant" button exist
+      const triggerButton = await page
+        .waitForSelector(`xpath/${triggerBtnXPath}`, { timeout: 3000 })
+        .catch(() => null);
+
+      if (triggerButton) {
+        console.log(
+          "Found 'Most relevant' filter. Switching to 'All comments'...",
+        );
+        await triggerButton.click();
+
+        const allCommentsOption = await page.waitForSelector(
+          `xpath/${menuOptionXPath}`,
+          { visible: true, timeout: 5000 },
+        );
+        if (allCommentsOption) {
+          await allCommentsOption.click();
+          await page.waitForSelector(
+            "xpath///div[@role='button'][.//span[contains(text(), 'All comments')]]",
+            { timeout: 5000 },
+          );
+          console.log("Successfully switched to 'All comments'.");
+        }
+      } else {
+        console.log("Filter is already 'All comments' or button not found.");
+      }
+    } catch (error) {
+      console.error("Error switching comment filter:", error);
+    }
+  }
+
+  public async sendToGoServer(
+    projectId: string,
+    data: ScrapeResultParams,
+    token: string,
+  ) {
+    logger.info(
+      `🚀 Bắt đầu gửi ${data.scrapeData.length} batch dữ liệu tới server Golang...`,
+    );
     try {
       const response = await fetch(
         `${process.env.DATA_PIPELINE_SERVER_PARENT_ENDPOINT}/${process.env.DATA_PIPELINE_SERVER_CHILD_ENDPOINT}/${projectId}/scraping/facebook/group/process-data`,
         {
           method: HTTP_POST_METHOD,
-          headers: { "Content-Type": API_CONTENT_TYPE, Authorization: `Bearer ${token}` },
+          headers: {
+            "Content-Type": API_CONTENT_TYPE,
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify(data, null, 2),
         },
       );
@@ -357,7 +621,7 @@ export default class FbScraperService {
   }
 }
 
-//   logger.info(`✅ 🚀 Bắt đầu chuyển ${rawDataAfterFetched.length} bài đăng dưới dạng dữ liệu RAW tới server Golang...`);
+//   logger.info(`Bắt đầu chuyển ${rawDataAfterFetched.length} bài đăng dưới dạng dữ liệu RAW tới server Golang...`);
 
 //   var data: any = [];
 //   if (rawDataAfterFetched.length > 0) {

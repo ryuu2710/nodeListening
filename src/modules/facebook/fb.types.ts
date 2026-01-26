@@ -14,6 +14,21 @@ export interface SocialFbMention {
     reactionBreakdown: Record<string, number>; // { like: 10, love: 5 }
   };
   createdAtTs: number;
-  // Các field metadata debug nếu cần
   scrapeSessionId?: string; 
+}
+
+export interface SocialFbComment {
+  id: string;
+  content: string;
+  author: {
+    id: string;
+    name: string;
+    avatar: string;
+    url: string;
+  };
+  stats: {
+    likes: number;
+    replies: number;
+  };
+  publishedAt: Date;
 }

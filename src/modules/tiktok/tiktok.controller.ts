@@ -82,9 +82,10 @@ export default class TiktokController implements BaseController {
         return;
       }
 
-      // const token: string = getTokenFromRequest(req);
       console.log(`Bắt đầu scrape cho profile: ${profileID}`);
       const data: ExcelLeadRow[] = await this.tiktokScraperService.scrapeCommentsByVideoId(profileID, videoID);
+
+      // let inbox
 
       res.status(200).json({
         message: `Scrape thành công các leads tiềm năng.`,
@@ -96,37 +97,37 @@ export default class TiktokController implements BaseController {
     }
   };
 
-  private scrapeProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      // 1. Lấy profileId từ request params
-      const { projectId } = req.params;
-      const { tiktokID } = req.body;
+  // private scrapeProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  //   try {
+  //     // 1. Lấy profileId từ request params
+  //     const { projectId } = req.params;
+  //     const { tiktokID } = req.body;
 
-      console.log(`Project ID là ${projectId}, profileId là ${tiktokID}`);
+  //     console.log(`Project ID là ${projectId}, profileId là ${tiktokID}`);
 
-      // 2. Kiểm tra xem profileId có tồn tại không
-      if (!projectId) {
-        res.status(400).json({ message: "Vui lòng cung cấp projectId." });
-        return;
-      }
+  //     // 2. Kiểm tra xem profileId có tồn tại không
+  //     if (!projectId) {
+  //       res.status(400).json({ message: "Vui lòng cung cấp projectId." });
+  //       return;
+  //     }
 
-      if (!tiktokID) {
-        res.status(400).json({ message: "Vui lòng cung cấp profileId." });
-        return;
-      }
+  //     if (!tiktokID) {
+  //       res.status(400).json({ message: "Vui lòng cung cấp profileId." });
+  //       return;
+  //     }
 
-      const token: string = getTokenFromRequest(req);
-      console.log(`Bắt đầu scrape cho profile: ${tiktokID}`);
-      const scrapedData: ScrapeResultParams | null = await this.tiktokScraperService.scrapeProfile(tiktokID, projectId, token);
+  //     const token: string = getTokenFromRequest(req);
+  //     console.log(`Bắt đầu scrape cho profile: ${tiktokID}`);
+  //     const scrapedData: ScrapeResultParams | null = await this.tiktokScraperService.scrapeProfile(tiktokID, [projectId], token);
 
-      // 4. Trả về kết quả thành công cho client
-      res.status(200).json({
-        message: `Scrape thành công profile ${tiktokID}. Tìm thấy ${scrapedData?.scrapeData.length} video.`,
-        result: scrapedData,
-      });
-    } catch (error) {
-      // 5. Nếu có lỗi, chuyển cho middleware xử lý lỗi của Express
-      next(error);
-    }
-  };
+  //     // 4. Trả về kết quả thành công cho client
+  //     res.status(200).json({
+  //       message: `Scrape thành công profile ${tiktokID}. Tìm thấy ${scrapedData?.scrapeData.length} video.`,
+  //       result: scrapedData,
+  //     });
+  //   } catch (error) {
+  //     // 5. Nếu có lỗi, chuyển cho middleware xử lý lỗi của Express
+  //     next(error);
+  //   }
+  // };
 }
