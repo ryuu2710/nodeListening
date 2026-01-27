@@ -1,3 +1,43 @@
+/**
+ * Định nghĩa cấu trúc cho một Fanpage (Brand hoặc KOL)
+ */
+export interface SocialPageEntity {
+  name: string;
+  url: string;
+  id?: string;
+  note?: string;
+  type?: string;
+}
+
+export interface CampaignDuration {
+  startDate: string; // ISO 8601 format: "2024-11-01T00:00:00Z"
+  endDate: string;
+}
+
+export interface CampaignSources {
+  // A. OWNED MEDIA: Fanpage
+  ownedPages: SocialPageEntity[];
+
+  // B. PAID MEDIA: Fanpage KOLs/Influencers
+  kolPages: SocialPageEntity[];
+
+  // C. EARNED MEDIA: Keyword to find in Group/Search
+  keywords: string[];
+}
+
+export interface TopicDefinition {
+  code: string;
+  keywords: string[];
+}
+
+export interface CampaignConfig {
+  campaign_name: string;
+  projectCode: string;     // Unique ID (VD: "zalopay_tet_2025")
+  duration: CampaignDuration;
+  sources: CampaignSources;
+  topics: TopicDefinition[];
+}
+
 export enum SocialPostType {
   STATUS = 'STATUS',
   PHOTO = 'PHOTO',
@@ -5,6 +45,23 @@ export enum SocialPostType {
   LINK = 'LINK',
   SHARE = 'SHARE',
   UNKNOWN = 'UNKNOWN'
+}
+
+export enum MentionType {
+  POST = 'POST',
+  COMMENT = 'COMMENT'
+}
+
+export enum ChannelType {
+  OWNED = 'OWNED',   // Fanpage ZaloPay
+  PAID = 'PAID',     // KOLs
+  EARNED = 'EARNED'  // Group/User
+}
+
+export enum SentimentType {
+  POSITIVE = 'POSITIVE',
+  NEUTRAL = 'NEUTRAL',
+  NEGATIVE = 'NEGATIVE'
 }
 
 export interface SocialAuthor {
@@ -50,6 +107,7 @@ export interface SocialFbMention {
 export interface SocialFbComment {
   id: string;
   content: string;
+  postId: string;
   author: {
     id: string;
     name: string;

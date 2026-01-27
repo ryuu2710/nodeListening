@@ -62,7 +62,8 @@ export const FACEBOOK_USER_PROFILE_NAME_CLASSLIST = ""
 export const FB_USER_PROFILE_API_REQUEST_FRIENDLY_NAME = 'ProfileCometTimelineFeedRefetchQuery'
 export const FB_GROUP_API_REQUEST_FRIENDLY_NAME = 'GroupsCometFeedRegularStoriesPaginationQuery'
 export const FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME="SearchCometResultsPaginatedResultsQuery";
-export const FB_POST_COMMENT_API_REQUEST_FRIENDLY_NAME="CommentsListComponentsPaginationQuery";
+export const FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME="CommentsListComponentsPaginationQuery";
+export const FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME="CommentListComponentsRootQuery";
 
 export const PPT_WAIT_UNTIL_DEFAULT = "networkidle2"
 // export const PPT_TIMEOUT_DEFAULT = 60_000

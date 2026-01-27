@@ -1,120 +1,200 @@
-Chào bro, tôi đã đọc kỹ code của bro.
+Chào bro, tôi đã "mổ xẻ" cái report **ZaloPay - Tết Nguyên Nhà** này rồi.
 
-**Nhận xét nhanh về code hiện tại:**
-Code của bro đang làm tốt nhiệm vụ **"Tìm kiếm (Search)"** trong một **"Group cụ thể"** với một **"Keyword cụ thể"**. Nó giống như bro cầm kính lúp đi soi đúng một góc nhà để tìm đồ vật vậy.
+Report này không chỉ đơn thuần là đếm số lượng bài viết. Nó tập trung vào **Insight (Sự thấu hiểu)**: Sắc thái cảm xúc (Sentiment), Chủ đề thảo luận (Topic), và Nguồn thảo luận (Source Breakdown).
 
-Tuy nhiên, để ra được cái Report "Tết Nguyên Nhà" của ZaloPay (nơi mà bro cần Overview cả thị trường, từ Fanpage nhà, KOLs, đến Groups đối thủ), thì luồng hiện tại đang bị "thiếu tầm nhìn".
+Với 3 hàm bro đang có (`Fanpage`, `GroupSearch`, `Comments`), bro đã có đủ "tay chân" để đi lấy nguyên liệu. Bây giờ bro cần một "bộ não" (Workflow) để lắp ghép chúng lại thành Data Model chuẩn.
 
-Dưới đây là phân tích sự khác biệt và **Đề xuất luồng nghiệp vụ mới** để nâng cấp từ "Tool cào dạo" thành "Hệ thống Social Listening".
+Dưới đây là **Luồng nghiệp vụ (Business Workflow)** và **Data Model** tối ưu để xuất ra được report này.
 
 ---
 
-### 1. Phân tích điểm nghẽn của luồng hiện tại
+### 1. Phân Tích Report: Chúng ta cần Data gì?
 
-Bro nhìn vào Input của hàm hiện tại:
+Từ report PDF, tôi bóc tách ra các metrics cốt lõi cần phải tính:
 
-```typescript
-projectId, groupId, keyword
+1. **Buzz Volume:** Tổng lượng thảo luận = (Số bài Post + Số Comment + Số Share).
+2. **Sentiment Score:** Tỷ lệ Tiêu cực (Negative) / Tích cực (Positive). *-> Cần phân tích text.*
+3. **Campaign Topics:** Người dùng nói về cái gì? (Nhạc Tết, Game Lắc Xì, VinFast, Từ thiện CSR). *-> Cần gán nhãn (Tagging).*
+4. **Source Contribution:** Thảo luận đến từ đâu? (Brand Page, KOLs, hay Community Group).
+
+---
+
+### 2. Thiết Kế Luồng Nghiệp Vụ (The Workflow)
+
+Bro không nên chạy tuần tự (Sequential) vì sẽ rất chậm. Hãy thiết kế theo mô hình **Pipeline**.
+
+#### Giai đoạn 1: Configuration (Thiết lập chiến dịch)
+
+Trước khi chạy code, bro cần định nghĩa Input:
+
+* **Owned Media (Brand):** URL Fanpage ZaloPay -> Dùng `scrapeFanpagePosts`.
+* **Paid Media (KOLs):** List URL Fanpage KOLs (Lê Dương Bảo Lâm, Trang Pháp...) -> Dùng `scrapeFanpagePosts`.
+* **Earned Media (Community):** List Keywords ("ZaloPay", "Lắc Xì", "Tết Nguyên Nhà") -> Dùng `scrapeGroupPostsByFilterParams`.
+
+#### Giai đoạn 2: The Scraping Engine (Vận hành 3 hàm của bro)
+
+```mermaid
+graph TD
+    A[Start Campaign] --> B{Source Type?}
+    
+    B -- Fanpage/KOLs --> C[Run: scrapeFanpagePosts]
+    B -- Keyword/Group --> D[Run: scrapeGroupPostsByFilterParams]
+    
+    C --> E[Raw Posts Queue]
+    D --> E
+    
+    E --> F{Check: Has Comments?}
+    F -- Yes --> G[Run: scrapeCommentsOfPost]
+    F -- No --> H[Skip Comment Scraping]
+    
+    G --> I[Raw Comments]
+    H --> J[Enrichment Process]
+    I --> J
 
 ```
 
-=> **Vấn đề:**
+#### Giai đoạn 3: Enrichment (Làm giàu dữ liệu - Bước quan trọng nhất)
 
-1. **Thiếu ngữ cảnh chiến dịch:** Bro chỉ biết cào keyword. Bro không biết keyword này là Brand (ZaloPay) hay là Game (Lắc Xì). Dẫn đến data trả về chỉ là một đống text hỗn độn, không phân loại được.
-2. **Thiếu đa dạng nguồn:** Hàm này chỉ chạy `FB_GROUP_API_SEARCH`. Nhưng trong report, bro cần cào **Fanpage ZaloPay (Owned Media)** và **KOLs (Paid Media)**. Fanpage và KOLs thì không dùng tính năng "Search trong Group" được, mà phải dùng tính năng "Quét tường nhà (Timeline/Feed)".
-3. **Bỏ quên Comment:** Code hiện tại tập trung lấy Post (`rawStories`). Nhưng 80% insight (yêu/ghét/spam) nằm ở **Comment**. Bro chưa có luồng đào sâu vào từng bài viết để lấy comment.
+Sau khi hàm của bro trả về Raw Text, bro cần một bước xử lý đi qua các bộ lọc:
+
+1. **Filter Spam:** Loại bỏ bài bán sim, xổ số.
+2. **Auto-Tagging:** Nếu content chứa "VinFast" -> Tag `topic: "VINFAST"`.
+3. **Sentiment Analysis:** Chấm điểm bài viết (Tạm thời bro có thể dùng từ điển keyword: "lỗi", "lag" -> Negative).
 
 ---
 
-### 2. Đề xuất Luồng Nghiệp vụ Mới (The New Workflow)
+### 3. Data Model (TypeScript Interfaces)
 
-Chúng ta sẽ chuyển tư duy từ **"Cào theo yêu cầu lẻ tẻ"** sang **"Chạy theo cấu hình Chiến dịch"**.
+Đây là đích đến cuối cùng. Bro cần lưu dữ liệu theo cấu trúc này để query ra report.
 
-Luồng mới sẽ gồm 4 bước lớn: **Orchestrator (Điều phối) -> Collector (Thu thập) -> Processor (Chế biến) -> Storage (Lưu kho)**.
+#### A. Bảng `SocialMention` (Dùng chung cho cả Post và Comment)
 
-#### Bước 1: The Orchestrator (Bộ điều phối thông minh)
+Tôi gộp Post và Comment vào một model chung (vì bản chất chúng đều là một đơn vị thảo luận - Mention) để dễ tính toán Buzz Volume.
 
-Thay vì controller gọi thẳng vào hàm scrape, bro cần một lớp ở giữa để đọc cái `Campaign Config` (cái JSON Database tôi thiết kế cho bro lúc nãy).
+```typescript
+export enum MentionType {
+  POST = 'POST',
+  COMMENT = 'COMMENT'
+}
 
-* **Input:** `Campaign_ID`.
+export enum ChannelType {
+  OWNED = 'OWNED',   // Fanpage ZaloPay
+  PAID = 'PAID',     // KOLs
+  EARNED = 'EARNED'  // Group/User
+}
+
+export enum SentimentType {
+  POSITIVE = 'POSITIVE',
+  NEUTRAL = 'NEUTRAL',
+  NEGATIVE = 'NEGATIVE'
+}
+
+export interface SocialMention {
+  // 1. Identity
+  id: string;              // ID bài viết/comment
+  parentId?: string;       // Nếu là Comment thì đây là ID bài Post gốc
+  url: string;             
+  type: MentionType;       // Post hay Comment?
+
+  // 2. Content & Metrics (Từ hàm scrape của bro)
+  content: string;
+  publishedAt: Date;
+  author: {
+    id: string;
+    name: string;
+    isVerified: boolean;   // Lấy từ hàm check tích xanh (Quan trọng để lọc KOL)
+  };
+  stats: {
+    likes: number;
+    comments: number;
+    shares: number;        // Chỉ Post mới có
+    views?: number;        // Nếu cào được video
+  };
+
+  // 3. Metadata chiến dịch (Cực quan trọng cho Report)
+  // Các trường này bro phải xử lý SAU khi cào xong
+  enrichment: {
+    channel: ChannelType;  // Phân loại nguồn (Brand/KOL/Group)
+    sentiment: SentimentType; 
+    keywords_matched: string[]; // Keyword nào đã trigger bài này?
+    is_spam: boolean;
+  };
+}
+
+```
+
+#### B. Bảng `CampaignConfig` (Cấu hình)
+
+Để controller biết cần gọi hàm nào.
+
+```typescript
+export interface CampaignConfig {
+  id: string;
+  name: string; // "Tết Nguyên Nhà"
+  duration: {
+    start: Date; // 01 Nov 2024
+    end: Date;   // 15 Feb 2025
+  };
+  targets: {
+    fanpages: string[]; // List URL để chạy scrapeFanpagePosts
+    keywords: string[]; // List Key để chạy scrapeGroupPostsByFilterParams
+    topics_definition: { // Định nghĩa topic để auto-tag
+      code: string;      // "VINFAST"
+      keywords: string[];// ["vinfast", "xe điện", "trúng xe"]
+    }[];
+  };
+}
+
+```
+
+---
+
+### 4. Mapping từ Hàm Scrape sang Report
+
+Để ra được các biểu đồ trong PDF, bro thực hiện query như sau:
+
+#### Chart 1: Diễn biến thảo luận (Timeline)
+
+* **Logic:** Query `SocialMention` where `is_spam = false`.
+* **Group by:** `publishedAt` (theo ngày/tuần).
+* **Metric:** Count(id).
+
+#### Chart 2: Sắc thái thảo luận (Sentiment Pie Chart)
+
+* **Input:** Hàm `scrapeCommentsOfPost` là quan trọng nhất ở đây. Vì bài Post thường Neutral, nhưng Comment mới chứa Negative/Positive.
 * **Logic:**
-1. Lấy danh sách `Monitored Sources` (List Page, Group, KOLs).
-2. Lấy danh sách `Keywords` (Brand, Campaign, Competitor).
-3. **Phân luồng:**
-* Nếu Source là **GROUP** -> Gọi Worker A (Dùng code hiện tại của bro để Search Keyword).
-* Nếu Source là **FANPAGE/KOL** -> Gọi Worker B (Cào Timeline/Feed - cái này bro chưa có, sẽ phải viết thêm).
+* Lấy toàn bộ Comment của các bài Post hot.
+* Phân loại Sentiment.
+* Tính % Negative trên tổng số.
 
 
 
+#### Chart 3: Top Sources (Nguồn thảo luận)
+
+* **Logic:**
+* `scrapeFanpagePosts` (ZaloPay) -> Gán `channel = OWNED`.
+* `scrapeFanpagePosts` (KOLs) -> Gán `channel = PAID`.
+* `scrapeGroupPostsByFilterParams` -> Gán `channel = EARNED`.
 
 
-#### Bước 2: The Collector (Thợ săn dữ liệu)
+* **Report:** So sánh Buzz Volume của 3 channel này.
 
-Ở đây code cũ của bro (`scrapeGroupPostsByFilterParams`) sẽ trở thành **một phần nhỏ** (Sub-module). Bro cần nâng cấp nó lên:
+#### Chart 4: Cloud Topic (Chủ đề nổi bật)
 
-* **Logic nâng cấp:**
-1. **Cào Post:** Như bro đang làm (OK).
-2. **Cào Comment (Mới):** Với mỗi Post cào được, nếu `total_comments > 10`, bro phải kích hoạt một luồng phụ: Mở popup post đó ra, scroll để lấy nội dung comments. Report ZaloPay cần đếm xem bao nhiêu người khen/chê, nên không thể bỏ qua comment.
-3. **Lấy Raw Metrics:** Đảm bảo lấy đủ `Like`, `Share`, `Comment` (bro đã làm được).
-
-
-
-#### Bước 3: The Processor (Nhà máy chế biến - Quan trọng nhất)
-
-Đây là bước biến "Rác" thành "Vàng". Trước khi `cleanedPosts.push()`, bro phải cho dữ liệu đi qua dây chuyền xử lý (Pipeline):
-
-1. **Normalization (Chuẩn hóa):** Giữ nguyên code `normalizeFacebookPost` của bro.
-2. **Spam Filtering (Lọc rác):**
-* Check content với `exclude_keywords` (lô đề, bán sim...). Nếu dính -> Gán cờ `is_spam = true`.
+* **Logic:** Duyệt qua field `enrichment.topics`.
+* **Ví dụ:**
+* Post có chữ "Lắc Xì" -> Tag `GAME`.
+* Comment "Nhạc hay quá" -> Tag `MUSIC`.
 
 
-3. **Tagging (Dán nhãn tự động):**
-* So khớp content với `brand_keywords` -> Gán `is_brand_mention`.
-* So khớp content với `topic_keywords` -> Gán `topic_tags` (VD: ["GAMI"], ["MUSIC"]).
+* **Report:** Đếm số lượng mention của từng Topic Tag.
 
+### Tổng kết
 
-4. **Sentiment Analysis (Phân tích cảm xúc):**
-* (Tạm thời) Dùng từ điển keyword đơn giản (vui/buồn).
-* (Tương lai) Gọi API OpenAI chấm điểm bài viết này.
+Bro đã có 3 công cụ (Hàm scrape) rất mạnh. Việc cần làm bây giờ là:
 
+1. **Dựng Database** theo model trên.
+2. Viết một **Orchestrator (Service điều phối)** để gọi 3 hàm này và map dữ liệu vào model `SocialMention`.
+3. Viết thêm module nhỏ **Auto-Tagging** (đơn giản là if/else keyword match) để điền dữ liệu vào `enrichment.topics`.
 
-
-#### Bước 4: Sync to Backend (Đồng bộ)
-
-Thay vì trả về cục JSON khổng lồ cho Client chờ đợi (sẽ bị timeout), bro nên:
-
-* Đẩy từng batch (ví dụ 10 bài) về API Spring Boot (`POST /api/mentions/batch`).
-* Spring Boot sẽ lưu vào Postgres.
-
----
-
-### 3. Sơ đồ Luồng dữ liệu (Visual Flow)
-
-Cụ thể luồng xử lý code sẽ thay đổi như sau:
-
-**Cũ:**
-`Controller` -> `ScrapeService` (Mở browser -> Search -> Trả về JSON)
-
-**Mới:**
-
-1. `Controller` nhận lệnh "Start Campaign ZaloPay".
-2. `CampaignService` đọc Config từ DB.
-3. Vòng lặp `Sources`:
-* Nếu là Group "Hội Review": Gọi `GroupSearchScraper` (Code bro đang có).
-* Nếu là Fanpage "ZaloPay": Gọi `PageTimelineScraper` (Cần viết mới).
-
-
-4. Trong lúc Scraper chạy:
-* Có Post mới -> Chạy hàm `enrichData(post)` (Tagging, Spam check).
-* Đẩy data đã enrich về Spring Boot ngay lập tức.
-
-
-5. Kết thúc: Báo cáo "Done" cho người dùng.
-
-### Tóm lại nhiệm vụ của bro:
-
-1. **Refactor:** Đổi tên hàm hiện tại thành `scrapeGroupSearch` (để dành riêng cho việc search trong group).
-2. **Enrichment:** Viết thêm logic xử lý data (Tagging, Spam filter) **ngay sau khi** `normalizeFacebookPost` và trước khi push vào mảng kết quả.
-3. **Expansion:** Chuẩn bị tinh thần viết thêm hàm `scrapePageTimeline` để cào Fanpage/KOL (vì Fanpage KOL không search keyword kiểu Group được, mà phải quét bài mới nhất trên tường).
-
-Bro thấy luồng này clear chưa? Nếu OK, tôi sẽ hướng dẫn bro sửa code hàm hiện tại để tích hợp phần **Enrichment (Xử lý data)** vào trước nhé.
+Là bro sẽ có ngay cái report xịn sò như Buzzmetrics!

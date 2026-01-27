@@ -25,8 +25,12 @@ export default class FbController implements BaseController {
 
   private initRoutes = (): void => {
     this.router
-      .route(`${this.path}/scrape/comments`)
-      .get(this.scrapeCommentsByGroupIdAndPostId);
+      .route(`${this.path}/scrape/group/comments`)
+      .post(this.scrapeCommentsByGroupIdAndPostId);
+
+    this.router
+      .route(`${this.path}/scrape/fanpage/comments`)
+      .post(this.scrapeCommentsOfPostInFanpageByPostId);
     
     this.router
       .route(`${this.path}/scrape/fanpage`)
@@ -84,7 +88,20 @@ export default class FbController implements BaseController {
     res: Response,
     next: NextFunction,
   ): Promise<void> => {
-    const data = await this.fbScraperService.scrapeCommentsOfPost();
+    // https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/
+    const {postURL} = req.body;
+    const data = await this.fbScraperService.scrapeCommentsOfPostInGroup(postURL);
+    res.status(200).json(data);
+  };
+
+  private scrapeCommentsOfPostInFanpageByPostId = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    // https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/
+    const {postURL} = req.body;
+    const data = await this.fbScraperService.scrapeCommentsOfPostInFanpage(postURL);
     res.status(200).json(data);
   };
 

@@ -191,7 +191,9 @@ function extractPostIdFromBase64(base64Id: string): string {
 export function extractFanpagePostsFromRawJson(json: any, isVerified: boolean): SocialFbMention[] {
   const edges = json?.data?.node?.timeline_list_feed_units?.edges;
   const userId: string = json?.data?.node?.id;
+  // data.node.timeline_list_feed_units.edges[0].node.post_id
   if (!Array.isArray(edges)) return [];
+  // const postId = json.data.node.timeline_list_feed_units.edges[0].node.post_id;
 
   return edges
     .map((edge: any) => {
@@ -242,12 +244,16 @@ export function extractFanpagePostsFromRawJson(json: any, isVerified: boolean): 
       },
       {} as Record<string, number>)
 
+
       // Path 1 -> Path 2 -> Path 3 -> 0
       const rawTime =
         timeFromContext || timeFromTimestamp || timeFromLegacy || 0;
+
+      // data.node.timeline_list_feed_units.edges[0].node.comet_sections.context_layout.story.comet_sections.actor_photo.story.actors[0].profile_url
+      let profileUrl = node.comet_sections.context_layout.story.comet_sections.actor_photo.story.actors[0].profile_url || "";
       return {
         id: extractPostIdFromBase64(node.id),
-        url: node.url,
+        url: profileUrl + "/posts/" + extractPostIdFromBase64(node.id),
         content:
           node.message?.text ||
           node.comet_sections?.content?.story?.message?.text ||
@@ -270,7 +276,7 @@ export function extractFanpagePostsFromRawJson(json: any, isVerified: boolean): 
     .filter((p) => p !== null);
 }
 
-export function extractCommentFromRawJson(json: any): SocialFbComment[] {
+export function extractCommentFromRawJson(json: any, parentPostId?: string): SocialFbComment[] {
   const edges =
     json?.data?.node?.comment_rendering_instance_for_feed_location?.comments
       ?.edges;
@@ -283,9 +289,13 @@ export function extractCommentFromRawJson(json: any): SocialFbComment[] {
       const node = edge.node;
       if (!node) return null;
 
+      // data.node.comment_rendering_instance_for_feed_location.comments.edges[6].node.parent_feedback.share_fbid
+      const postId = node.parent_feedback?.share_fbid || "";;
+
       return {
         id: node.legacy_fbid || node.id,
         content: node.body?.text || "",
+        postId: parentPostId,
         author: {
           id: node.author?.id,
           name: node.author?.name,
