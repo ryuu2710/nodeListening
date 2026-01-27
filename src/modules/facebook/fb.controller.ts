@@ -25,15 +25,58 @@ export default class FbController implements BaseController {
 
   private initRoutes = (): void => {
     this.router
-      .route(`${this.path}/scrape/:projectId`)
-      .post(this.scrapeFacebookGroup);
-    this.router
       .route(`${this.path}/scrape/comments`)
       .get(this.scrapeCommentsByGroupIdAndPostId);
+    
+    this.router
+      .route(`${this.path}/scrape/fanpage`)
+      .post(this.scrapeFanpageFeed);
     this.router.route(`${this.path}/scrape/build-url`).get(this.buildURL);
     this.router
       .route(`${this.path}/brand-insight`)
       .post(this.generateBrandInsightReport);
+    this.router
+      .route(`${this.path}/scrape/:projectId`)
+      .post(this.scrapeFacebookGroup);
+  };
+
+  private scrapeFanpageFeed = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    try {
+      const { pageUrl, sinceDate } = req.body;
+      if (!pageUrl) {
+        res.status(400).json({ message: "Missing 'pageUrl' in body" });
+        return;
+      }
+
+      if (!sinceDate) {
+        res.status(400).json({ message: "Missing 'sinceDate' in body (YYYY-MM-DD)" });
+        return;
+      }
+
+      const parsedSinceDate = new Date(sinceDate);
+      if (isNaN(parsedSinceDate.getTime())) {
+        res.status(400).json({ message: "Invalid 'sinceDate' format" });
+        return;
+      }
+
+      console.log(`Start scraping Fanpage: ${pageUrl} since ${parsedSinceDate.toISOString()}`);
+
+      const posts = await this.fbScraperService.scrapeFanpagePosts(pageUrl, parsedSinceDate);
+      res.status(200).json({
+        success: true,
+        count: posts.length,
+        filter_date: parsedSinceDate.toISOString(),
+        data: posts,
+      });
+
+    } catch (error) {
+      console.error("🔥 Error in scrapeFanpageFeed controller:", error);
+      next(error);
+    }
   };
 
   private scrapeCommentsByGroupIdAndPostId = async (
@@ -44,6 +87,8 @@ export default class FbController implements BaseController {
     const data = await this.fbScraperService.scrapeCommentsOfPost();
     res.status(200).json(data);
   };
+
+  // https://www.facebook.com/Zalopay
 
   private scrapeFacebookGroup = async (
     req: Request,

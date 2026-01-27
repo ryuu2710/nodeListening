@@ -12,6 +12,7 @@ import {
   FB_GROUP_API_REQUEST_FRIENDLY_NAME,
   FB_GROUP_API_SEARCH_REQUEST_FRIENDLY_NAME,
   FB_POST_COMMENT_API_REQUEST_FRIENDLY_NAME,
+  FB_USER_PROFILE_API_REQUEST_FRIENDLY_NAME,
   HTTP_POST_METHOD,
   INFO_ENV,
   PPT_REQUEST_KEY,
@@ -38,6 +39,7 @@ import { FormatVnTimeMsg } from "#share/display.js";
 import { SocialFbComment, SocialFbMention } from "./fb.types";
 import {
   extractCommentFromRawJson,
+  extractFanpagePostsFromRawJson,
   extractPostsFromRawJson,
   normalizeFacebookPost,
 } from "./fb.clean";
@@ -284,6 +286,179 @@ export default class FbScraperService {
         await browser.disconnect();
       }
     }
+  }
+
+  /**
+ * Check xem Fanpage hiện tại có tích xanh không.
+ * Logic: Tìm thẻ h1 (Tên Page) -> Quét các SVG xung quanh xem có cái nào title là Verified không.
+ */
+  public async checkIsFanpageVerified(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const verifyKeywords = [
+      'Verified account', 
+      'Tài khoản đã xác minh', 
+      'Đã xác minh',
+      'Verified'
+    ];
+
+    const h1 = document.querySelector('h1');
+    if (!h1) return false;
+    const headerContainer = h1.closest('div[role="main"]') || h1.parentElement?.parentElement || document.body;
+    const svgs = headerContainer.querySelectorAll('svg');
+
+    for (const svg of svgs) {
+      const titleTag = svg.querySelector('title');
+      if (titleTag && titleTag.textContent) {
+        if (verifyKeywords.includes(titleTag.textContent)) return true;
+      }
+
+      const titleAttr = svg.getAttribute('title');
+      if (titleAttr && verifyKeywords.includes(titleAttr)) return true;
+
+      const ariaLabel = svg.getAttribute('aria-label');
+      if (ariaLabel && verifyKeywords.includes(ariaLabel)) return true;
+    }
+
+    return false;
+  });
+}
+
+  public async scrapeFanpagePosts(targetURL: string, sinceDate: Date): Promise<SocialFbMention[]>{
+    // 1. Goto Page URL
+    // 2. Loop Scroll
+    // 3. Parse HTML từng bài post trên feed để lấy ID, Content, Date
+    // 4. Nếu Date < sinceDate -> Break Loop
+    // 5. Return List Posts
+    let browser: Browser | null = null;
+    const scrapeStartTime = Date.now();
+    const cleanedPosts: any[] = [];
+    let isKeepScrolling = true;
+    let timeoutCount = 0;
+    const MAX_TIMEOUT_RETRIES = 3;
+
+    // Open browser
+    try {
+      browser = await getMyCustomRemoteBrowser();
+      const page: Page = await browser.newPage();
+      await page.setRequestInterception(true);
+      page.on(PPT_REQUEST_KEY, (req) => req.continue());
+
+      // Open CDP Network domain to get postData fallback
+      const client = await page.target().createCDPSession();
+
+      // set the viewport of browser
+      const { windowId } = await client.send("Browser.getWindowForTarget");
+      await client.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: "fullscreen" },
+      });
+
+      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
+
+      await page.setViewport({
+        width: 0,
+        height: 0,
+        isMobile: false,
+        hasTouch: false,
+        deviceScaleFactor: 1,
+      });
+
+      await page.goto(targetURL, {
+        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
+        timeout: PPT_TIMEOUT_DEFAULT,
+      });
+
+      // Is verified user?
+      const isVerified = await this.checkIsFanpageVerified(page);
+      logger.info(`Fanpage Verified Status: ${isVerified}`);
+
+      while(isKeepScrolling) {
+        const networkRacePromise = Promise.race([
+          WaitNextGraphQL(client, FB_USER_PROFILE_API_REQUEST_FRIENDLY_NAME).then(
+            (res) => ({
+              status: "SUCCESS",
+              data: res,
+            }),
+          ),
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
+          ),
+        ]);
+
+        // immitate human scroll behaviour
+        await this.humanScroll(page);
+
+        await page.evaluate(() => {
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth",
+          });
+        });
+
+        const result = (await networkRacePromise) as {
+          status: string;
+          data: any;
+        };
+
+        if (result.status === "TIMEOUT") {
+          timeoutCount++;
+          logger.warn(`Scroll Timeout (${timeoutCount}/${MAX_TIMEOUT_RETRIES}). No new data.`);
+
+          if (timeoutCount >= MAX_TIMEOUT_RETRIES) {
+            logger.info("Max timeouts reached. Stopping scrape.");
+            isKeepScrolling = false;
+            break;
+          }
+          continue;
+        }
+
+        // if data found ==> reset timeout count
+        timeoutCount = 0;
+        const { headers, bodyRaw } = result.data;
+        logger.info(
+          `Snapshot request '${FB_USER_PROFILE_API_REQUEST_FRIENDLY_NAME}'`,
+        );
+
+        const cookieStr = await getCookiesFromCurrentPage(page);
+        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
+          await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
+        const processedBatchFbData = await fetchAndProcessBatchGqlData(
+          fbRequestOptionsBuilderForCallApi,
+          logger,
+        );
+
+        if(processedBatchFbData) {
+          const jsonData = typeof processedBatchFbData === "string"
+            ? JSON.parse(processedBatchFbData)
+            : processedBatchFbData;
+          const batchPosts = extractFanpagePostsFromRawJson(jsonData, isVerified);
+
+          if (batchPosts.length > 0) {
+            const validPosts = batchPosts.filter(post => {
+              return post.publishedAt >= sinceDate;
+            })
+            cleanedPosts.push(...validPosts);
+            logger.info(`Collected ${validPosts.length} posts from batch.`);
+
+            const lastPostInBatch = batchPosts[batchPosts.length - 1];
+            if (lastPostInBatch && lastPostInBatch.publishedAt < sinceDate) {
+               logger.info(`Found post from ${lastPostInBatch.publishedAt.toISOString()} which is older than ${sinceDate.toISOString()}. Stopping.`);
+               isKeepScrolling = false;
+            }
+          } else {
+             logger.warn("Batch has no edges (might be empty feed unit).");
+          }
+        }
+      }
+    } catch(error) {
+      logger.error("Error scraping fanpage:", error as any);
+    } finally {
+      if (browser) {
+        browser.disconnect();
+      }
+    }
+      
+    return cleanedPosts;
   }
 
   public async scrapeCommentsOfPost() {

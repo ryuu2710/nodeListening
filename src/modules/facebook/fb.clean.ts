@@ -1,3 +1,4 @@
+import { url } from "inspector";
 import { SocialFbMention, SocialFbComment } from "./fb.types";
 
 function getSafe<T>(obj: any, ...paths: (string | number)[][]): T | undefined {
@@ -169,10 +170,104 @@ export function normalizeFacebookPost(node: any): SocialFbMention | null {
     id,
     url,
     content,
-    author,
+    authorMock: author,
     stats,
     createdAtTs: ts,
+    publishedAt: new Date(),
   };
+}
+
+// Helper to decode Base64 ID (Ex: "S:_I100...:123..." -> "123...")
+function extractPostIdFromBase64(base64Id: string): string {
+  try {
+    const decoded = Buffer.from(base64Id, "base64").toString("utf8");
+    const parts = decoded.split(":");
+    return parts[parts.length - 1];
+  } catch (e) {
+    return base64Id; // Fallback
+  }
+}
+
+export function extractFanpagePostsFromRawJson(json: any, isVerified: boolean): SocialFbMention[] {
+  const edges = json?.data?.node?.timeline_list_feed_units?.edges;
+  const userId: string = json?.data?.node?.id;
+  if (!Array.isArray(edges)) return [];
+
+  return edges
+    .map((edge: any) => {
+      const node = edge.node;
+      if (!node) return null;
+
+      // data.node.timeline_list_feed_units.edges[0].node.feedback.owning_profile.name
+      const username =
+        node.feedback.owning_profile.name ||
+        node.feedback.owning_profile.short_name ||
+        "";
+
+      // Share/Memory
+      const timeFromContext =
+        node.comet_sections?.context_layout?.story?.comet_sections
+          ?.metadata?.[0]?.story?.creation_time;
+      // normal post
+      const timeFromTimestamp =
+        node.comet_sections?.timestamp?.story?.creation_time;
+      // old fallback
+      const timeFromLegacy =
+        node.creation_time || node.story_extra_info?.publish_time;
+
+      // data.node.timeline_list_feed_units.edges[0].node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.top_reactions
+      const topReactionEdges: any[] =
+        node.comet_sections.feedback.story.story_ufi_container.story
+          .feedback_context.feedback_target_with_context
+          .comet_ufi_summary_and_actions_renderer.feedback.top_reactions.edges;
+      const likeVal: number =
+        topReactionEdges.find(
+          (edge: any) => edge.node.localized_name === "Like",
+        )?.reaction_count || 0;
+
+      // data.node.timeline_list_feed_units.edges[0].node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.comments_count_summary_renderer.feedback.comment_rendering_instance.comments.total_count
+      const commentsCount: number = node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.comments_count_summary_renderer.feedback.comment_rendering_instance.comments.total_count
+        || node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.comment_rendering_instance.comments.total_count 
+        || node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comment_rendering_instance.comments.total_count 
+        || 0;
+
+      // data.node.timeline_list_feed_units.edges[0].node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.share_count.count
+      const shareCount: number = node.comet_sections.feedback.story.story_ufi_container.story.feedback_context.feedback_target_with_context.comet_ufi_summary_and_actions_renderer.feedback.share_count.count || 0;
+      const reactionBreakdown: Record<string, number> = topReactionEdges.reduce((acc, reactionEdge) => {
+        const reactionKey = reactionEdge.node.localized_name;
+        const reactionVal = Number(reactionEdge.reaction_count || 0);
+
+        acc[reactionKey] = reactionVal;
+        return acc;
+      },
+      {} as Record<string, number>)
+
+      // Path 1 -> Path 2 -> Path 3 -> 0
+      const rawTime =
+        timeFromContext || timeFromTimestamp || timeFromLegacy || 0;
+      return {
+        id: extractPostIdFromBase64(node.id),
+        url: node.url,
+        content:
+          node.message?.text ||
+          node.comet_sections?.content?.story?.message?.text ||
+          "",
+        author: {
+          id: userId,
+          name: username,
+          isVerified,
+        },
+        attachments: [{}],
+        stats: {
+          likes: likeVal,
+          comments: commentsCount,
+          shares: shareCount,
+          reactionBreakdown,
+        },
+        publishedAt: new Date(rawTime * 1000),
+      } as SocialFbMention;
+    })
+    .filter((p) => p !== null);
 }
 
 export function extractCommentFromRawJson(json: any): SocialFbComment[] {
@@ -189,7 +284,7 @@ export function extractCommentFromRawJson(json: any): SocialFbComment[] {
       if (!node) return null;
 
       return {
-      id: node.legacy_fbid || node.id,
+        id: node.legacy_fbid || node.id,
         content: node.body?.text || "",
         author: {
           id: node.author?.id,
