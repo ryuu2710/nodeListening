@@ -8,6 +8,7 @@ import { buildFbGroupSearchUrl } from "./fb.builder";
 import { SocialFbMention } from "./fb.types";
 import { BrandInsightService } from "#modules/metrics/brand.service.js";
 import { BrandInsightReport } from "#modules/metrics/brand.type.js";
+import { logger } from "#share/logger.js";
 
 @injectable()
 export default class FbController implements BaseController {
@@ -74,7 +75,7 @@ export default class FbController implements BaseController {
         return;
       }
 
-      console.log(`Start scraping Fanpage: ${pageUrl} since ${parsedSinceDate.toISOString()}`);
+      logger.info(`Start scraping Fanpage: ${pageUrl} since ${parsedSinceDate.toISOString()}`);
 
       const posts = await this.fbScraperService.scrapeFanpagePosts(pageUrl, parsedSinceDate);
       res.status(200).json({
@@ -109,7 +110,7 @@ export default class FbController implements BaseController {
     // https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/
     const {postURL} = req.body;
     const data = await this.fbScraperService.scrapeCommentsOfPostInFanpage(postURL);
-    res.status(200).json(data);
+    res.status(200).json({count: data.length, data});
   };
 
   private scrapeCommentsOfReelInFanpageByPostId = async (

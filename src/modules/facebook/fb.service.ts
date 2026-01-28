@@ -691,13 +691,15 @@ export default class FbScraperService {
             target = document.documentElement; // Fallback window
           }
 
-          target.scrollBy({ top: 500, behavior: "smooth" });
-
-          if (target.scrollTop + target.clientHeight < target.scrollHeight) {
-            setTimeout(() => {
-              target.scrollTop = target.scrollHeight;
-            }, 500);
-          }
+          target.scrollTop = target.scrollHeight;
+          
+          // Trick: Nhích lên 1 tí rồi kéo xuống lại để kích hoạt event nếu đang bị kẹt
+          setTimeout(() => {
+             target.scrollTop = target.scrollHeight - 10;
+             setTimeout(() => {
+                 target.scrollTop = target.scrollHeight;
+             }, 100);
+          }, 100);
         });
 
         const result = (await networkPromises) as { status: string; data: any };
@@ -742,6 +744,8 @@ export default class FbScraperService {
             console.error("Error parsing GraphQL data:", parseError);
           }
         }
+
+        await new Promise((r) => setTimeout(r, 2500));
       }
 
       logger.info(`Collected ${cleanedComments.length} comments`);
