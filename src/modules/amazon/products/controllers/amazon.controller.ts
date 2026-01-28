@@ -5,6 +5,7 @@ import AmazonScraperService from "../services/amazon.service";
 import { AmazonScrapeResultParams, AmazonProductDTO, ScrapeResultGenParams } from "#types/index.js";
 import axios from "axios";
 import { getTokenFromRequest } from "#share/auth.js";
+import { logger } from "#share/logger.js";
 
 const SPREADSHEET_ID = "1MSui6cXsAN46zMZbUH_lYVpkllZA7TN4_B5PiEF52W0";
 
@@ -25,7 +26,7 @@ export default class AmazonController implements BaseController {
 
   private exportToGgSheet = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      console.log("Đã vào hàm testExcelExport");
+      logger.info("Đã vào hàm testExcelExport");
 
       // 1. Kiểm tra body trước
       if (!req.body) {
@@ -38,12 +39,12 @@ export default class AmazonController implements BaseController {
 
       // 2. Bây giờ destructuring mới an toàn
       const { data } = req.body as ExcelTestBodyDto;
-      console.log(`Nhận yêu cầu xuất Google Sheet cho ${data.length} sản phẩm...`);
+      logger.info(`Nhận yêu cầu xuất Google Sheet cho ${data.length} sản phẩm...`);
 
       // 3. Gọi hàm service
       await this.amazonScraperService.appendDataToGoogleSheet(data);
 
-      console.log(`Ghi Google Sheet thành công!`);
+      logger.info(`Ghi Google Sheet thành công!`);
 
       res.status(200).json({
         success: true,
@@ -51,7 +52,7 @@ export default class AmazonController implements BaseController {
         spreadsheetId: SPREADSHEET_ID
       });
     } catch (error) {
-      console.log({ message: "Lỗi khi xuất file Excel", error });
+      logger.error({ message: "Lỗi khi xuất file Excel", error });
       next(error);
     }
   };
@@ -75,7 +76,7 @@ export default class AmazonController implements BaseController {
       // res.status(200).json(data);
       res.status(200).json({});
     } catch (error) {
-      console.log("Lỗi scrape amazon: ", error);
+      logger.error({message: "Lỗi scrape amazon: ", error});
     }
   };
 
@@ -105,7 +106,7 @@ export default class AmazonController implements BaseController {
     //     }
     //   });
 
-    //   console.log('✅ Gửi sang Golang thành công:', goResponse.data);
+    //   logger.info('✅ Gửi sang Golang thành công:', goResponse.data);
     // } catch (goError) {
     //   console.error('❌ Lỗi khi gửi sang Golang:', goError);
     // }

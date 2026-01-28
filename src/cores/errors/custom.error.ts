@@ -61,9 +61,6 @@ export class AppError extends Error {
 
         filteredStack = filteredStack.map(stack => stack.trim());
 
-        console.log("Data of filtered stack");
-        console.log(filteredStack)
-
         // Return formatted, cleaned-up stack trace
         return filteredStack.slice(1, 5).join(" "); // Limit to 5 lines for brevity
     }

@@ -51,11 +51,11 @@ export default class FbWorkerController {
       );
 
       // Worker B (Group) - Chạy ngầm song song với A
-      // this.workerService.executeGroupBatch(
-      //   config.sources.keywords,
-      //   config.sources.communityGroups,
-      //   config.duration.startDate,
-      // );
+      this.workerService.executeGroupBatch(
+        config.sources.keywords,
+        config.sources.communityGroups,
+        config.duration.startDate,
+      );
 
       // LƯU Ý: KHÔNG gọi Worker C ở đây!
       // Worker C sẽ được gọi BÊN TRONG Worker A và B khi tìm thấy bài viết.

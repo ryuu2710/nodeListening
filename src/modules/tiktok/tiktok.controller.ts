@@ -8,6 +8,7 @@ import { ExcelLeadRow, FeCreditLeadResponse, TikTokCommentDTO } from "#types/tik
 import fs from 'fs/promises';
 import path from "path";
 import _ from "lodash";
+import { logger } from "#share/logger.js";
 
 @injectable()
 export default class TiktokController implements BaseController {
@@ -28,20 +29,19 @@ export default class TiktokController implements BaseController {
     try {
       const filePath = path.join(process.cwd(), "data.json");
 
-      console.log(`📂 Đang đọc file từ: ${filePath}`);
+      logger.info(`📂 Đang đọc file từ: ${filePath}`);
 
-      // 2. Kiểm tra file có tồn tại không
       try {
         await fs.access(filePath);
-      } catch {
-        console.error("❌ Không tìm thấy file data.json ở thư mục gốc!");
+      } catch(error) {
+        logger.error({message: "Không tìm thấy file data.json ở thư mục gốc!", error});
       }
 
       const fileContent = await fs.readFile(filePath, "utf-8");
       const jsonData = JSON.parse(fileContent) as FeCreditLeadResponse;
 
       if (jsonData.result && Array.isArray(jsonData.result)) {
-        console.log(`✅ Đã đọc thành công ${jsonData.count} leads từ file JSON.`);
+        logger.info(`✅ Đã đọc thành công ${jsonData.count} leads từ file JSON.`);
         let data = jsonData.result;
         data = data.map(item => {
             return {
@@ -52,18 +52,18 @@ export default class TiktokController implements BaseController {
         data = data.filter(data => data["ĐIỆN THOẠI"] === "")
 
         res.status(200).json({
-          message: "✅ Đã đọc thành công ${jsonData.count} leads từ file JSON.",
+          message: "Đã đọc thành công ${jsonData.count} leads từ file JSON.",
           data
         })
       } else {
-        console.warn("⚠️ File JSON không có trường 'result' hoặc rỗng.");
+        logger.warn("File JSON không có trường 'result' hoặc rỗng.");
         res.status(500).json({
-          message: "⚠️ File JSON không có trường 'result' hoặc rỗng.",
+          message: "File JSON không có trường 'result' hoặc rỗng.",
           data: jsonData
         })
       }
     } catch (error) {
-      console.error("🔥 Lỗi khi đọc file JSON:", error);
+      logger.error({message: "Lỗi khi đọc file JSON:", error});
     }
 
   };
@@ -82,10 +82,8 @@ export default class TiktokController implements BaseController {
         return;
       }
 
-      console.log(`Bắt đầu scrape cho profile: ${profileID}`);
+      logger.info(`Bắt đầu scrape cho profile: ${profileID}`);
       const data: ExcelLeadRow[] = await this.tiktokScraperService.scrapeCommentsByVideoId(profileID, videoID);
-
-      // let inbox
 
       res.status(200).json({
         message: `Scrape thành công các leads tiềm năng.`,
@@ -96,38 +94,4 @@ export default class TiktokController implements BaseController {
       next(error);
     }
   };
-
-  // private scrapeProfile = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  //   try {
-  //     // 1. Lấy profileId từ request params
-  //     const { projectId } = req.params;
-  //     const { tiktokID } = req.body;
-
-  //     console.log(`Project ID là ${projectId}, profileId là ${tiktokID}`);
-
-  //     // 2. Kiểm tra xem profileId có tồn tại không
-  //     if (!projectId) {
-  //       res.status(400).json({ message: "Vui lòng cung cấp projectId." });
-  //       return;
-  //     }
-
-  //     if (!tiktokID) {
-  //       res.status(400).json({ message: "Vui lòng cung cấp profileId." });
-  //       return;
-  //     }
-
-  //     const token: string = getTokenFromRequest(req);
-  //     console.log(`Bắt đầu scrape cho profile: ${tiktokID}`);
-  //     const scrapedData: ScrapeResultParams | null = await this.tiktokScraperService.scrapeProfile(tiktokID, [projectId], token);
-
-  //     // 4. Trả về kết quả thành công cho client
-  //     res.status(200).json({
-  //       message: `Scrape thành công profile ${tiktokID}. Tìm thấy ${scrapedData?.scrapeData.length} video.`,
-  //       result: scrapedData,
-  //     });
-  //   } catch (error) {
-  //     // 5. Nếu có lỗi, chuyển cho middleware xử lý lỗi của Express
-  //     next(error);
-  //   }
-  // };
 }

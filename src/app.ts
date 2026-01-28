@@ -6,6 +6,7 @@ import compression from "compression";
 import cookieParser from "cookie-parser";
 import BaseController from "./types/base/base.controller";
 import { ErrorMiddleware } from './middlewares/error.middleware';
+import { logger } from '#share/logger.js';
 
 // import "reflect-metadata";
 
@@ -54,7 +55,7 @@ export default class App {
 
     public listen() {
         this.express.listen(this.port, () => {
-            console.log(`Server connected to ${process.env.HOST}:${this.port} `)
+            logger.info(`Server connected to ${process.env.HOST}:${this.port} `)
         })
     }
 }

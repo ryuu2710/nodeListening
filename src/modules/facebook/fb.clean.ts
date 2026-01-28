@@ -1,5 +1,6 @@
 import { url } from "inspector";
 import { SocialFbMention, SocialFbComment } from "./fb.types";
+import { logger } from "#share/logger.js";
 
 function getSafe<T>(obj: any, ...paths: (string | number)[][]): T | undefined {
   for (const path of paths) {
@@ -281,7 +282,7 @@ export function extractFanpagePostsFromRawJson(
           .permalink_url ||
         node.comet_sections.content.story.attachments[0].styles.attachment
           .style_infos[0].containing_story.attachments[0].media.permalink_url;
-      console.log(`\nPermanent link: ${permanentURL}`);
+      logger.info(`Permanent link:`, permanentURL);
 
       // data.node.timeline_list_feed_units.edges[0].node.post_id
       // data.node.timeline_list_feed_units.edges[0].node.comet_sections.content.story.post_id
@@ -340,6 +341,7 @@ export function extractCommentFromRawJson(
   const edges =
     json?.data?.node?.comment_rendering_instance_for_feed_location?.comments
       ?.edges;
+
   if (!Array.isArray(edges)) {
     return [];
   }
@@ -376,10 +378,10 @@ export function extractCommentFromRawJson(
 }
 
 /**
- * Helper lấy Clean URL, loại bỏ query params
- * @param urlString - Link gốc (VD: https://.../?comment_id=123)
- * @returns Link sạch (VD: https://.../)
- */
+* Helper retrieves Clean URL, removes query params
+* @param urlString - Original link (eg: https://.../?comment_id=123)
+* @returns Clean link (eg: https://.../)
+*/
 export const getCleanReelUrl = (urlString: string): string => {
   try {
     const url = new URL(urlString);

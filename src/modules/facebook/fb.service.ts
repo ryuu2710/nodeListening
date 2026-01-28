@@ -45,10 +45,7 @@ import {
   normalizeFacebookPost,
 } from "./fb.clean";
 import { buildFbGroupSearchUrl } from "./fb.builder";
-
-const logger = pino({
-  level: process.env.NODE_ENV === PRODUCTION_ENV ? INFO_ENV : DEBUG_ENV,
-});
+import { logger } from "#share/logger.js";
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -564,7 +561,7 @@ export default class FbScraperService {
         }
 
         const { headers, bodyRaw } = result.data;
-        console.log(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+        logger.info(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
 
         const cookieStr = await getCookiesFromCurrentPage(page);
         const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
@@ -585,7 +582,7 @@ export default class FbScraperService {
                 ? JSON.parse(processedBatchData)
                 : processedBatchData;
 
-            console.log(`Cleaned comment batch successfully.`);
+            logger.info(`Cleaned comment batch successfully.`);
 
             // Parse to json dto
             const batchComments: SocialFbComment[] = extractCommentFromRawJson(
@@ -599,7 +596,7 @@ export default class FbScraperService {
         }
       }
 
-      console.log(`\nCollected ${cleanedComments.length} comments`);
+      logger.info(`Collected ${cleanedComments.length} comments`);
       return cleanedComments;
     } catch (error) {
       console.error("Error in scrapeCommentsOfPost:", error);
@@ -712,7 +709,7 @@ export default class FbScraperService {
         }
 
         const { headers, bodyRaw } = result.data;
-        console.log(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+        logger.info(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
 
         const cookieStr = await getCookiesFromCurrentPage(page);
         const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
@@ -733,7 +730,7 @@ export default class FbScraperService {
                 ? JSON.parse(processedBatchData)
                 : processedBatchData;
 
-            console.log(`Cleaned comment batch successfully.`);
+            logger.info(`Cleaned comment batch successfully.`);
 
             // Parse to json dto
             const batchComments: SocialFbComment[] = extractCommentFromRawJson(
@@ -747,7 +744,7 @@ export default class FbScraperService {
         }
       }
 
-      console.log(`\nCollected ${cleanedComments.length} comments`);
+      logger.info(`Collected ${cleanedComments.length} comments`);
       return cleanedComments;
     } catch (error) {
       console.error("Error in scrapeCommentsOfPost:", error);
@@ -902,7 +899,7 @@ export default class FbScraperService {
             }
 
             const { headers, bodyRaw } = result.data;
-            console.log(
+            logger.info(
               `Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`,
             );
 
@@ -927,7 +924,7 @@ export default class FbScraperService {
                     ? JSON.parse(processedBatchData)
                     : processedBatchData;
 
-                console.log(`Cleaned comment batch successfully.`);
+                logger.info(`Cleaned comment batch successfully.`);
 
                 // Parse to json dto
                 const batchComments: SocialFbComment[] =
@@ -948,96 +945,7 @@ export default class FbScraperService {
           logger.error("error select view more button: ", error as any);
         }
       }
-      // await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-
-      // for (let i = 0; i < 5; i++) {
-      // const networkPromises = Promise.race([
-      //   WaitNextGraphQL(
-      //     client,
-      //     FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME,
-      //   ).then((res) => ({
-      //     status: "SUCCESS",
-      //     data: res,
-      //   })),
-      //   new Promise((resolve) =>
-      //     setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
-      //   ),
-      // ]);
-
-      //   await page.evaluate(async () => {
-      //     const dialog = document.querySelector('div[role="dialog"]');
-      //     let target = dialog as HTMLElement;
-
-      //     if (dialog) {
-      //       const scrollableChild = Array.from(
-      //         dialog.querySelectorAll("*"),
-      //       ).find((el) => {
-      //         const e = el as HTMLElement;
-      //         return (
-      //           e.scrollHeight > e.clientHeight &&
-      //           ["auto", "scroll"].includes(
-      //             window.getComputedStyle(e).overflowY,
-      //           )
-      //         );
-      //       });
-      //       if (scrollableChild) target = scrollableChild as HTMLElement;
-      //     } else {
-      //       target = document.documentElement; // Fallback window
-      //     }
-
-      //     target.scrollBy({ top: 500, behavior: "smooth" });
-
-      //     if (target.scrollTop + target.clientHeight < target.scrollHeight) {
-      //       setTimeout(() => {
-      //         target.scrollTop = target.scrollHeight;
-      //       }, 500);
-      //     }
-      //   });
-
-      // const result = (await networkPromises) as { status: string; data: any };
-      // if (result.status === "TIMEOUT" || !result.data) {
-      //   console.warn(
-      //     `Loop ${i + 1}: No new GraphQL request captured (Timeout).`,
-      //   );
-      //   continue;
-      // }
-
-      // const { headers, bodyRaw } = result.data;
-      // console.log(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
-
-      // const cookieStr = await getCookiesFromCurrentPage(page);
-      // const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
-      //   headers,
-      //   bodyRaw,
-      //   cookieStr,
-      // );
-      // const processedBatchData = await fetchAndProcessBatchGqlData(
-      //   fbRequestOptions,
-      //   logger,
-      // );
-
-      //   if (processedBatchData) {
-      // try {
-      //   // Parse to json node
-      //   const jsonData =
-      //     typeof processedBatchData === "string"
-      //       ? JSON.parse(processedBatchData)
-      //       : processedBatchData;
-
-      //   console.log(`Cleaned comment batch successfully.`);
-
-      //   // Parse to json dto
-      //   const batchComments: SocialFbComment[] = extractCommentFromRawJson(
-      //     jsonData,
-      //     "", // postId
-      //   );
-      //   batchComments.map((data) => cleanedComments.push(data));
-      // } catch (parseError) {
-      //   console.error("Error parsing GraphQL data:", parseError);
-      // }
-      //   }
-      // }
-      console.log(`\nCollected ${cleanedComments.length} comments`);
+      logger.info(`Collected ${cleanedComments.length} comments`);
       return cleanedComments;
     } catch (error) {
       console.error("Error in scrapeCommentsOfPost:", error);
@@ -1185,7 +1093,7 @@ export default class FbScraperService {
         .catch(() => null);
 
       if (triggerButton) {
-        console.log(
+        logger.info(
           "Found 'Most relevant' filter. Switching to 'All comments'...",
         );
 
@@ -1201,10 +1109,10 @@ export default class FbScraperService {
             "xpath///div[@role='button'][.//span[contains(text(), 'All comments')]]",
             { timeout: 5000 },
           );
-          console.log("Successfully switched to 'All comments'.");
+          logger.info("Successfully switched to 'All comments'.");
         }
       } else {
-        console.log("Filter is already 'All comments' or button not found.");
+        logger.info("Filter is already 'All comments' or button not found.");
       }
     } catch (error) {
       console.error("Error switching comment filter:", error);
@@ -1228,7 +1136,7 @@ export default class FbScraperService {
       const pause = Math.floor(Math.random() * 2000) + 2000;
       await new Promise((r) => setTimeout(r, pause));
     } catch (e) {
-      console.log("Scroll error ignored");
+      logger.info("Scroll error ignored");
     }
   }
 
@@ -1289,7 +1197,7 @@ export default class FbScraperService {
 //     try {
 //         // Sending batches parallel
 //         const responses = await Promise.all(sendPromises);
-//         console.log("✅ All batches processed successfully!");
+//         logger.info("✅ All batches processed successfully!");
 //         data.push(...responses);
 //     } catch (error) {
 //         console.error("An error occurred while sending batches:", error);
