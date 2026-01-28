@@ -108,6 +108,8 @@ export interface SocialFbComment {
   id: string;
   content: string;
   postId: string;
+  postURL?: string;
+  commentURL?: string;
   author: {
     id: string;
     name: string;

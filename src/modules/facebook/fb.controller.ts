@@ -31,17 +31,24 @@ export default class FbController implements BaseController {
     this.router
       .route(`${this.path}/scrape/fanpage/comments`)
       .post(this.scrapeCommentsOfPostInFanpageByPostId);
-    
+
     this.router
       .route(`${this.path}/scrape/fanpage`)
       .post(this.scrapeFanpageFeed);
+
     this.router.route(`${this.path}/scrape/build-url`).get(this.buildURL);
+
     this.router
       .route(`${this.path}/brand-insight`)
       .post(this.generateBrandInsightReport);
+
     this.router
       .route(`${this.path}/scrape/:projectId`)
       .post(this.scrapeFacebookGroup);
+
+    this.router
+      .route(`${this.path}/scrape/fanpage/reel/:postId/comments`)
+      .post(this.scrapeCommentsOfReelInFanpageByPostId);
   };
 
   private scrapeFanpageFeed = async (
@@ -102,6 +109,17 @@ export default class FbController implements BaseController {
     // https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/
     const {postURL} = req.body;
     const data = await this.fbScraperService.scrapeCommentsOfPostInFanpage(postURL);
+    res.status(200).json(data);
+  };
+
+  private scrapeCommentsOfReelInFanpageByPostId = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    // https://www.facebook.com/reel/879156304830814/
+    const {postURL} = req.body;
+    const data = await this.fbScraperService.scrapeCommentsOfReelInFanpage(postURL);
     res.status(200).json(data);
   };
 
