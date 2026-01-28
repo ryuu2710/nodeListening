@@ -120,7 +120,7 @@ export default class FbController implements BaseController {
     // https://www.facebook.com/reel/879156304830814/
     const {postURL} = req.body;
     const data = await this.fbScraperService.scrapeCommentsOfReelInFanpage(postURL);
-    res.status(200).json(data);
+    res.status(200).json({count: data.length, data});
   };
 
   // https://www.facebook.com/Zalopay

@@ -843,7 +843,13 @@ export default class FbScraperService {
         'xpath///div[@role="button"]//span[contains(text(), "View more comments")]';
       const commentContainerSelector = 'div[role="complementary"]';
 
-      for (let i = 0; i < 5; i++) {
+      // for (let i = 0; i < 5; i++) {
+      let loopCount = 0;
+      const MAX_PAGINATION_LOOPS = 100;
+      let isLoadingMore = true;
+
+      while (isLoadingMore && loopCount < MAX_PAGINATION_LOOPS) {
+        loopCount++;
         try {
           const container = await page.$(commentContainerSelector);
           const scrollDialog = async (
@@ -861,7 +867,7 @@ export default class FbScraperService {
           };
 
           // scroll dialog
-          scrollDialog(container);
+          await scrollDialog(container);
 
           const viewMoreCommentBtn = await page.waitForSelector(
             viewMoreSelector,
@@ -884,8 +890,8 @@ export default class FbScraperService {
               ),
             ]);
             await viewMoreCommentBtn.click();
-            await new Promise((r) => setTimeout(r, 1000))
-            logger.info(`Clicked 'View more' ${i + 1} time`);
+            await new Promise((r) => setTimeout(r, 1000));
+            logger.info(`Clicked 'View more' ${loopCount + 1} time`);
 
             const result = (await networkPromises) as {
               status: string;
@@ -893,7 +899,7 @@ export default class FbScraperService {
             };
             if (result.status === "TIMEOUT" || !result.data) {
               console.warn(
-                `Loop ${i + 1}: No new GraphQL request captured (Timeout).`,
+                `Loop ${loopCount + 1}: No new GraphQL request captured (Timeout).`,
               );
               continue;
             }
@@ -903,7 +909,7 @@ export default class FbScraperService {
               `Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`,
             );
 
-            scrollDialog(container);
+            await scrollDialog(container);
 
             const cookieStr = await getCookiesFromCurrentPage(page);
             const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
@@ -939,10 +945,25 @@ export default class FbScraperService {
             }
           } else {
             logger.info("Not see 'View more', done loading all comments.");
-            break;
+            isLoadingMore = false;
           }
         } catch (error) {
-          logger.error("error select view more button: ", error as any);
+          if (
+            error instanceof Error &&
+            error.message.includes("Waiting for selector")
+          ) {
+            logger.info(
+              "✅ No more 'View more comments' button found. Pagination finished.",
+            );
+          } else {
+            logger.error({
+              message: `❌ Unexpected error in loop ${loopCount}:`,
+              error,
+            });
+          }
+
+          // Dừng vòng lặp
+          isLoadingMore = false;
         }
       }
       logger.info(`Collected ${cleanedComments.length} comments`);

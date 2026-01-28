@@ -46,7 +46,7 @@ export class FbWorkerService {
             platform: "FACEBOOK",
           },
           crawledAt: new Date().toISOString(),
-          comments_data: [],
+          // comments_data: [],
         }));
         const listPostsNeededComments = enrichedPosts.filter(
           (p) => p.stats.comments > 0,
