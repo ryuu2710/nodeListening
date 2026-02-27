@@ -31,21 +31,23 @@ import {
   ScrapeResultGenParams,
   ScrapeResultParams,
 } from "#types/index.js";
-import { BuildFbRequestOptionsForCallApi, WaitNextGraphQL } from "#share/fb.js";
+import { BuildFbRequestOptionsForCallApi, BuildFbRequestOptionsForCallApi_V2, WaitNextGraphQL } from "#share/fb.js";
 import {
   fetchAndProcessBatchGqlData,
   getCookiesFromCurrentPage,
 } from "#share/api.js";
 import { FormatVnTimeMsg } from "#share/display.js";
-import { SocialFbComment, SocialFbMention } from "./fb.types";
+import { CommentPageInfo, CommentsProcessingGraphqlResult, SocialFbComment, SocialFbMention } from "./fb.types";
 import {
   extractCommentFromRawJson,
   extractFanpagePostsFromRawJson,
+  extractPageInfoOfComments,
   extractPostsFromRawJson,
   normalizeFacebookPost,
 } from "./fb.clean";
 import { buildFbGroupSearchUrl } from "./fb.builder";
 import { logger } from "#share/logger.js";
+import { result } from "lodash";
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -616,6 +618,40 @@ export default class FbScraperService {
     const scrapeStartTime = Date.now();
     const cleanedComments: SocialFbComment[] = [];
 
+    const processGraphQLData = async (dataPayload: any, currentPage: Page) => {
+      const { headers, bodyRaw } = dataPayload;
+      logger.info(`Captured ${FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+
+      const cookieStr = await getCookiesFromCurrentPage(currentPage);
+      const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
+        headers,
+        bodyRaw,
+        cookieStr,
+      );
+      const processedBatchData = await fetchAndProcessBatchGqlData(
+        fbRequestOptions,
+        logger,
+      );
+
+      if (processedBatchData) {
+        try {
+          const jsonData =
+            typeof processedBatchData === "string"
+              ? JSON.parse(processedBatchData)
+              : processedBatchData;
+          const batchComments: SocialFbComment[] = extractCommentFromRawJson(
+            jsonData,
+            postId,
+          );
+
+          batchComments.forEach((data) => cleanedComments.push(data));
+          logger.info(`Cleaned and added ${batchComments.length} comments.`);
+        } catch (parseError) {
+          console.error("Error parsing GraphQL data:", parseError);
+        }
+      }
+    };
+
     // Open browser
     try {
       browser = await getMyCustomRemoteBrowser();
@@ -656,8 +692,10 @@ export default class FbScraperService {
       // toggle button from "Most Relevant" -> "All Comments"
       this.switchCommentsViewMode(page);
 
-      for (let i = 0; i < 5; i++) {
-        const networkPromises = Promise.race([
+      // await new Promise((r) => setTimeout(r, 2000));
+
+      for (let i = 0; i < 2; i++) {
+        const switchTrapPromise = Promise.race([
           WaitNextGraphQL(
             client,
             FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME,
@@ -679,76 +717,239 @@ export default class FbScraperService {
               dialog.querySelectorAll("*"),
             ).find((el) => {
               const e = el as HTMLElement;
+              const style = window.getComputedStyle(e);
               return (
                 e.scrollHeight > e.clientHeight &&
-                ["auto", "scroll"].includes(
-                  window.getComputedStyle(e).overflowY,
-                )
+                ["auto", "scroll"].includes(style.overflowY)
               );
             });
             if (scrollableChild) target = scrollableChild as HTMLElement;
           } else {
-            target = document.documentElement; // Fallback window
+            target = document.documentElement;
           }
 
+          target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
+
+          await new Promise((resolve) => setTimeout(resolve, 800));
+
+          target.scrollTop = target.scrollHeight - 10;
+          await new Promise((resolve) => setTimeout(resolve, 100));
           target.scrollTop = target.scrollHeight;
-          
-          // Trick: Nhích lên 1 tí rồi kéo xuống lại để kích hoạt event nếu đang bị kẹt
-          setTimeout(() => {
-             target.scrollTop = target.scrollHeight - 10;
-             setTimeout(() => {
-                 target.scrollTop = target.scrollHeight;
-             }, 100);
-          }, 100);
         });
 
-        const result = (await networkPromises) as { status: string; data: any };
-        if (result.status === "TIMEOUT" || !result.data) {
+        const switchResult = (await switchTrapPromise) as {
+          status: string;
+          data: any;
+        };
+        console.log("\n\n\nCurrent switch result: ", switchResult);
+        if (switchResult.status === "TIMEOUT" || !switchResult.data) {
           console.warn(
             `Loop ${i + 1}: No new GraphQL request captured (Timeout).`,
           );
           continue;
         }
-
-        const { headers, bodyRaw } = result.data;
-        logger.info(`Captured ${FB_GROUP_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
-
-        const cookieStr = await getCookiesFromCurrentPage(page);
-        const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
-          headers,
-          bodyRaw,
-          cookieStr,
-        );
-        const processedBatchData = await fetchAndProcessBatchGqlData(
-          fbRequestOptions,
-          logger,
-        );
-
-        if (processedBatchData) {
-          try {
-            // Parse to json node
-            const jsonData =
-              typeof processedBatchData === "string"
-                ? JSON.parse(processedBatchData)
-                : processedBatchData;
-
-            logger.info(`Cleaned comment batch successfully.`);
-
-            // Parse to json dto
-            const batchComments: SocialFbComment[] = extractCommentFromRawJson(
-              jsonData,
-              postId,
-            );
-            batchComments.map((data) => cleanedComments.push(data));
-          } catch (parseError) {
-            console.error("Error parsing GraphQL data:", parseError);
-          }
-        }
-
-        await new Promise((r) => setTimeout(r, 2500));
+        await processGraphQLData(switchResult.data, page);
+        await new Promise((r) => setTimeout(r, 1000));
       }
 
       logger.info(`Collected ${cleanedComments.length} comments`);
+      return cleanedComments;
+    } catch (error) {
+      console.error("Error in scrapeCommentsOfPost:", error);
+      return [];
+    } finally {
+      if (browser) {
+        await browser.disconnect();
+      }
+    }
+  }
+
+  public async scrapeCommentsOfPostInFanpage_V2(
+    targetURL: string,
+    postId?: string,
+  ): Promise<SocialFbComment[]> {
+    let browser: Browser | null = null;
+    const scrapeStartTime = Date.now();
+    const cleanedComments: SocialFbComment[] = [];
+
+    const processGraphQLData = async (
+      headers: any, 
+      bodyRaw: string,
+      currentPage: Page,
+      nextCursor?: string,
+    ) => {
+      logger.info(`Captured ${FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+
+      const cookieStr = await getCookiesFromCurrentPage(currentPage);
+      const fbRequestOptions = await BuildFbRequestOptionsForCallApi_V2(
+        headers,
+        bodyRaw,
+        cookieStr,
+        nextCursor
+      );
+      const processedBatchData = await fetchAndProcessBatchGqlData(
+        fbRequestOptions,
+        logger,
+      );
+
+      let commentsResult: CommentsProcessingGraphqlResult = {
+        comments: [],
+        hasNextPage: false,
+        endCursor: null,
+      };
+
+      if (processedBatchData) {
+        try {
+          const jsonData =
+            typeof processedBatchData === "string"
+              ? JSON.parse(processedBatchData)
+              : processedBatchData;
+
+          const batchComments: SocialFbComment[] = extractCommentFromRawJson(
+            jsonData,
+            postId,
+          );
+
+          commentsResult.comments = batchComments;
+
+          // extract page info
+          const pageInfo: CommentPageInfo = extractPageInfoOfComments(jsonData);
+          commentsResult.hasNextPage = pageInfo.hasNextPage;
+          commentsResult.endCursor = pageInfo.endCursor;
+        } catch (parseError) {
+          console.error("Error parsing GraphQL data:", parseError);
+        }
+      }
+
+      return commentsResult;
+    };
+
+    // Open browser
+    try {
+      browser = await getMyCustomRemoteBrowser();
+      const page: Page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      );
+
+      await page.setRequestInterception(true);
+      page.on(PPT_REQUEST_KEY, (req) => req.continue());
+
+      // Open CDP Network domain to get postData fallback
+      const client = await page.target().createCDPSession();
+
+      // set the viewport of browser
+
+      const { windowId } = await client.send("Browser.getWindowForTarget");
+      await client.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: "fullscreen" },
+      });
+
+      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
+
+      await page.setViewport({
+        width: 0,
+        height: 0,
+        isMobile: false,
+        hasTouch: false,
+        deviceScaleFactor: 1,
+      });
+
+      await page.goto(targetURL, {
+        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
+        timeout: PPT_TIMEOUT_DEFAULT,
+      });
+
+      // toggle button from "Most Relevant" -> "All Comments"
+      this.switchCommentsViewMode(page);
+
+      const switchTrapPromise = Promise.race([
+        WaitNextGraphQL(
+          client,
+          "CommentsListComponentsPaginationQuery",
+        ).then((res) => ({
+          status: "SUCCESS",
+          data: res,
+        })),
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
+        ),
+      ]);
+
+      await page.evaluate(async () => {
+        const dialog = document.querySelector('div[role="dialog"]');
+        let target = dialog as HTMLElement;
+
+        if (dialog) {
+          const scrollableChild = Array.from(
+            dialog.querySelectorAll("*"),
+          ).find((el) => {
+            const e = el as HTMLElement;
+            const style = window.getComputedStyle(e);
+            return (
+              e.scrollHeight > e.clientHeight &&
+              ["auto", "scroll"].includes(style.overflowY)
+            );
+          });
+          if (scrollableChild) target = scrollableChild as HTMLElement;
+        } else {
+          target = document.documentElement;
+        }
+
+        target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
+
+        await new Promise((resolve) => setTimeout(resolve, 800));
+
+        target.scrollTop = target.scrollHeight - 10;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        target.scrollTop = target.scrollHeight;
+      });
+
+      const switchResult = (await switchTrapPromise) as {
+        status: string;
+        data: any;
+      };
+      // console.log("\n\n\nCurrent switch result: ", switchResult);
+
+      if (switchResult.status === "TIMEOUT" || !switchResult.data) {
+        throw new Error("Không bắt được gói tin khởi tạo GraphQL");
+      }
+
+      const rootHeaders = switchResult.data.headers;
+      const rootBodyRaw = switchResult.data.bodyRaw;
+
+      let currentCommentsResult: CommentsProcessingGraphqlResult =
+        await processGraphQLData(rootHeaders, rootBodyRaw, page);
+
+      currentCommentsResult.comments.forEach(c => cleanedComments.push(c));
+
+      let loopCount = 1;
+      const MAX_API_LOOPS = 20;
+
+      console.log("Has next page: ", currentCommentsResult.hasNextPage);
+
+      while(currentCommentsResult.hasNextPage &&
+        currentCommentsResult.endCursor &&
+        loopCount < MAX_API_LOOPS) {
+        logger.info(`[API Request ${loopCount}] Fetching next comments using cursor:
+            ${currentCommentsResult.endCursor.substring(0, 15)}...`);
+
+        currentCommentsResult = await processGraphQLData(
+          rootHeaders,
+          rootBodyRaw,
+          page,
+          currentCommentsResult.endCursor
+        )
+
+        currentCommentsResult.comments.forEach(c => cleanedComments.push(c));
+        loopCount++;
+
+        // prevent rate limit from Facebook
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      logger.info(`Finished API Pagination. Total loops: ${loopCount}. Total comments: ${cleanedComments.length}`);
       return cleanedComments;
     } catch (error) {
       console.error("Error in scrapeCommentsOfPost:", error);
@@ -1122,7 +1323,8 @@ export default class FbScraperService {
           "Found 'Most relevant' filter. Switching to 'All comments'...",
         );
 
-        await triggerButton.click();
+        // await triggerButton.click();
+        await page.evaluate((el) => (el as HTMLElement).click(), triggerButton);
 
         const allCommentsOption = await page.waitForSelector(
           `xpath/${menuOptionXPath}`,

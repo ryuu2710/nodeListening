@@ -1,5 +1,5 @@
 import { url } from "inspector";
-import { SocialFbMention, SocialFbComment } from "./fb.types";
+import { SocialFbMention, SocialFbComment, CommentPageInfo } from "./fb.types";
 import { logger } from "#share/logger.js";
 
 function getSafe<T>(obj: any, ...paths: (string | number)[][]): T | undefined {
@@ -334,6 +334,33 @@ export function extractFanpagePostsFromRawJson(
     .filter((p) => p !== null);
 }
 
+export function extractPageInfoOfComments(
+  json: any,
+  parentPostId?: string,
+): CommentPageInfo {
+  const pageInfoJson =
+    json?.data?.node?.comment_rendering_instance_for_feed_location?.comments
+      .page_info;
+
+  console.log("Page info json: ", pageInfoJson);
+
+  let pageInfo: CommentPageInfo = {
+    startCursor: "",
+    endCursor: "",
+    hasNextPage: false,
+  };
+
+  if (pageInfoJson) {
+    pageInfo = {
+      startCursor: pageInfoJson.start_cursor,
+      endCursor: pageInfoJson.end_cursor,
+      hasNextPage: pageInfoJson.has_next_page,
+    } as CommentPageInfo;
+  }
+
+  return pageInfo;
+}
+
 export function extractCommentFromRawJson(
   json: any,
   parentPostId?: string,
@@ -345,6 +372,8 @@ export function extractCommentFromRawJson(
   if (!Array.isArray(edges)) {
     return [];
   }
+
+  console.log("Length of edges: ", edges.length);
 
   return edges
     .map((edge: any) => {
@@ -378,10 +407,10 @@ export function extractCommentFromRawJson(
 }
 
 /**
-* Helper retrieves Clean URL, removes query params
-* @param urlString - Original link (eg: https://.../?comment_id=123)
-* @returns Clean link (eg: https://.../)
-*/
+ * Helper retrieves Clean URL, removes query params
+ * @param urlString - Original link (eg: https://.../?comment_id=123)
+ * @returns Clean link (eg: https://.../)
+ */
 export const getCleanReelUrl = (urlString: string): string => {
   try {
     const url = new URL(urlString);

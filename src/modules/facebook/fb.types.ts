@@ -122,3 +122,15 @@ export interface SocialFbComment {
   };
   publishedAt: Date;
 }
+
+export interface CommentsProcessingGraphqlResult {
+  comments: SocialFbComment[];
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+
+export interface CommentPageInfo {
+  startCursor: string;
+  endCursor: string;
+  hasNextPage: boolean;
+}

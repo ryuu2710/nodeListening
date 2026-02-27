@@ -77,6 +77,20 @@ export type FacebookBodyParams = {
     | "doc_id"]: string;
 } & Record<string, string>;
 
+export interface FbCommentVariables {
+  commentsAfterCount: number;
+  commentsAfterCursor: string | null;
+  commentsBeforeCount: number | null;
+  commentsBeforeCursor: string | null;
+  commentsIntentToken: string;
+  feedLocation: string;
+  focusCommentID: string | null;
+  scale: number;
+  useDefaultActor: boolean;
+  id: string; // Target ID (feedback id)
+  [key: string]: any; // Flag __relay_internal__
+}
+
 // ---------------------------
 // 1. Interface cho phần "variables"
 // ---------------------------
