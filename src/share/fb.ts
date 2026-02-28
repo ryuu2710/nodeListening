@@ -144,12 +144,12 @@ async function BuildHeaderDTO(
     priority: recordHeaders["priority"],
     referer: recordHeaders["referer"],
     "sec-ch-prefers-color-scheme": recordHeaders["sec-ch-prefers-color-scheme"],
-    "sec-ch-ua": recordHeaders["sec-ch-ua"],
-    "sec-ch-ua-full-version-list": recordHeaders["sec-ch-ua-full-version-list"],
-    "sec-ch-ua-mobile": recordHeaders["sec-ch-ua-mobile"],
-    "sec-ch-ua-model": recordHeaders["sec-ch-ua-model"],
-    "sec-ch-ua-platform": recordHeaders["sec-ch-ua-platform"],
-    "sec-ch-ua-platform-version": recordHeaders["sec-ch-ua-platform-version"],
+    "sec-ch-ua": recordHeaders["sec-ch-ua"] || '',
+    "sec-ch-ua-full-version-list": recordHeaders["sec-ch-ua-full-version-list"] || '',
+    "sec-ch-ua-mobile": recordHeaders["sec-ch-ua-mobile"] || '',
+    "sec-ch-ua-model": recordHeaders["sec-ch-ua-model"] || '',
+    "sec-ch-ua-platform": recordHeaders["sec-ch-ua-platform"] || '',
+    "sec-ch-ua-platform-version": recordHeaders["sec-ch-ua-platform-version"] || '',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-origin",
@@ -206,17 +206,60 @@ export async function BuildBodyParamsConfig(
   return fbBodyParamsConfig;
 }
 
+export async function extractGroupPageInfo(jsonData: any) {
+  const pageInfo = jsonData?.data?.page_info;
+  return {
+    endCursor: pageInfo?.end_cursor || null,
+    hasNextPage: pageInfo?.has_next_page || false
+  };
+}
+
+// for group post
+export async function BuildFbRequestOptionsForCallApi_V3(  headersRaw: Record<string, string>,
+  bodyRaw: string,
+  cookieValue: string,
+  nextCursor?: string | null) {
+    const fbHeadersDto = await BuildHeaderDTO(headersRaw, cookieValue);
+  const fbBodyDto: FacebookBodyParams = await BuildBodyParamsConfig(bodyRaw);
+
+  if (nextCursor && fbBodyDto.variables) {
+    const vars = JSON.parse(fbBodyDto.variables);
+    
+    // Nếu là Group Feed thì field tên là 'cursor'
+    if (vars.hasOwnProperty('cursor')) {
+        vars.cursor = nextCursor;
+    } 
+    // Nếu là Comment Pagination thì field tên là 'commentsAfterCursor'
+    else if (vars.hasOwnProperty('commentsAfterCursor')) {
+        vars.cursor = nextCursor;
+        vars.commentsAfterCursor = nextCursor;
+    }
+    
+    fbBodyDto.variables = JSON.stringify(vars);
+}
+
+  const fbHeadersBuilder = new Headers(fbHeadersDto);
+  const fbBodyBuilder = BuildFacebookBodyParams(fbBodyDto);
+
+  return {
+    method: HTTP_POST_METHOD,
+    headers: fbHeadersBuilder,
+    body: fbBodyBuilder,
+    redirect: FETCH_FB_API_REDIRECT_KEY,
+  } as FacebookFetchOptions;
+}
+
 // Build request completion for calling Facebook API
 export async function BuildFbRequestOptionsForCallApi_V2(
   headersRaw: Record<string, string>,
   bodyRaw: string,
   cookieValue: string,
-  nextCursor?: string
+  nextCursor?: string,
 ): Promise<FacebookFetchOptions> {
   const fbHeadersDto = await BuildHeaderDTO(headersRaw, cookieValue);
   const fbBodyDto: FacebookBodyParams = await BuildBodyParamsConfig(bodyRaw);
 
-  if(nextCursor && fbBodyDto.variables) {
+  if (nextCursor && fbBodyDto.variables) {
     try {
       const varJson: FbCommentVariables = JSON.parse(fbBodyDto.variables);
       varJson.commentsAfterCursor = nextCursor;
@@ -300,4 +343,46 @@ export function WaitNextGraphQL(
     };
     client.on(CDP_REQUEST_WILL_BE_SENT_KEY, listener);
   });
+}
+
+export function extractAndDecodeFbCursor(bodyRaw: string): {
+  originalVariables: string;
+  fullDecodedString: string;
+  realCursor: string;
+} | null {
+  try {
+    // 1. Parse bodyRaw (URL-encoded)
+    const params = new URLSearchParams(bodyRaw);
+    const variablesRaw = params.get("variables");
+
+    if (!variablesRaw) return null;
+
+    // 2. Parse variables JSON
+    const variables = JSON.parse(variablesRaw);
+    const base64Cursor = variables.cursor;
+
+    if (!base64Cursor) return null;
+
+    // 3. Decode Base64 to string (Buffer Node.js)
+    // Note: The results will contain binary bytes (Thrift format)
+    const decodedBuffer = Buffer.from(base64Cursor, "base64");
+    const decodedString = decodedBuffer.toString("utf-8");
+
+    // 4. Accessing 'real_cursor'
+    // Since it's binary, we use Regex to "extract" the ID string after the keyword 'real_cursor'
+    // The structure is usually: ...real_cursor <byte_length> <cursor_value>
+    const realCursorMatch = decodedString.match(
+      /real_cursor\W+([A-Za-z0-9+/=_-]+)/,
+    );
+    const realCursor = realCursorMatch ? realCursorMatch[1] : "Not found";
+
+    return {
+      originalVariables: variables,
+      fullDecodedString: decodedString,
+      realCursor: realCursor,
+    };
+  } catch (error) {
+    console.error("❌ Lỗi khi bóc tách cursor:", error);
+    return null;
+  }
 }

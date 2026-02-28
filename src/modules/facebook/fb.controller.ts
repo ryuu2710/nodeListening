@@ -2,7 +2,7 @@ import BaseController from "#types/base/base.controller.js";
 import { NextFunction, Request, Response, Router } from "express";
 import { inject, injectable } from "tsyringe";
 import FbScraperService from "./fb.service";
-import { ScrapeRequest, ScrapeResultGenParams } from "#types/index.js";
+import { ScrapeGroupRequest, ScrapeRequest, ScrapeResultGenParams } from "#types/index.js";
 import { getTokenFromRequest } from "#share/auth.js";
 import { buildFbGroupSearchUrl } from "./fb.builder";
 import { SocialFbMention } from "./fb.types";
@@ -45,13 +45,18 @@ export default class FbController implements BaseController {
 
     this.router
       .route(`${this.path}/scrape/:projectId`)
-      .post(this.scrapeFacebookGroup);
+      .post(this.scrapeFacebookGroupByFilterParams);
+
+    this.router
+      .route(`${this.path}/scrape/group/posts`)
+      .post(this.scrapeFacebookGroupDefault);
 
     this.router
       .route(`${this.path}/scrape/fanpage/reel/:postId/comments`)
       .post(this.scrapeCommentsOfReelInFanpageByPostId);
   };
 
+  // scrapeFanpageFeed
   private scrapeFanpageFeed = async (
     req: Request,
     res: Response,
@@ -91,6 +96,7 @@ export default class FbController implements BaseController {
     }
   };
 
+  // scrapeCommentsByGroupIdAndPostId
   private scrapeCommentsByGroupIdAndPostId = async (
     req: Request,
     res: Response,
@@ -102,6 +108,7 @@ export default class FbController implements BaseController {
     res.status(200).json(data);
   };
 
+  // scrapeCommentsOfPostInFanpageByPostId
   private scrapeCommentsOfPostInFanpageByPostId = async (
     req: Request,
     res: Response,
@@ -109,10 +116,11 @@ export default class FbController implements BaseController {
   ): Promise<void> => {
     // https://www.facebook.com/groups/reviewcactiemcaphesaigon/posts/3401776906795134/
     const {postURL} = req.body;
-    const data = await this.fbScraperService.scrapeCommentsOfPostInFanpage_V2(postURL);
+    const data = await this.fbScraperService.scrapeCommentsOfPostInFanpage(postURL);
     res.status(200).json({count: data.length, data});
   };
 
+  // scrapeCommentsOfReelInFanpageByPostId
   private scrapeCommentsOfReelInFanpageByPostId = async (
     req: Request,
     res: Response,
@@ -124,9 +132,44 @@ export default class FbController implements BaseController {
     res.status(200).json({count: data.length, data});
   };
 
-  // https://www.facebook.com/Zalopay
+  // Scrape facebook group as default mode
+  private scrapeFacebookGroupDefault = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    const { projectId } = req.params;
+    const { groupURL, numberOfPosts } = req.body as ScrapeGroupRequest;
+    // const token: string = getTokenFromRequest(req)
 
-  private scrapeFacebookGroup = async (
+    if (!groupURL) {
+      res.status(400).json({ message: "Lack of parameter 'groupURL'" });
+      return;
+    }
+
+    try {
+      logger.info(`Receive scraping requirement for group: ${groupURL}`);
+      const cleanedPosts: SocialFbMention[] = await this.fbScraperService.scrapeGroupPostsFromDiscussionFeed(groupURL, numberOfPosts)
+
+      res.status(200).json({
+        message: `Successfully collect ${cleanedPosts.length} posts from group ${groupURL}.`,
+        count: cleanedPosts.length,
+        cleanedPosts,
+      });
+    } catch (error) {
+      console.error(
+        "Error for request process handling during scraping:",
+        error,
+      );
+      res.status(500).json({
+        message: "Occured unexpected error during scraping.",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // https://www.facebook.com/Zalopay
+  private scrapeFacebookGroupByFilterParams = async (
     req: Request,
     res: Response,
     next: NextFunction,

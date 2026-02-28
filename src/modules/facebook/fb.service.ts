@@ -23,7 +23,7 @@ import {
   QUERY_PARAMS_CHRONOLOGICAL_ACTIVITY,
   TWENTY,
 } from "#constants/index.js";
-import { Browser, ElementHandle, Page } from "puppeteer";
+import { Browser, CDPSession, ElementHandle, Page } from "puppeteer";
 import { getMyCustomRemoteBrowser } from "#share/browser.js";
 import {
   FacebookFetchOptions,
@@ -31,13 +31,26 @@ import {
   ScrapeResultGenParams,
   ScrapeResultParams,
 } from "#types/index.js";
-import { BuildFbRequestOptionsForCallApi, BuildFbRequestOptionsForCallApi_V2, WaitNextGraphQL } from "#share/fb.js";
+import {
+  BuildFbRequestOptionsForCallApi,
+  BuildFbRequestOptionsForCallApi_V2,
+  BuildFbRequestOptionsForCallApi_V3,
+  extractAndDecodeFbCursor,
+  extractGroupPageInfo,
+  WaitNextGraphQL,
+} from "#share/fb.js";
 import {
   fetchAndProcessBatchGqlData,
+  fetchAndProcessMainGqlData,
   getCookiesFromCurrentPage,
 } from "#share/api.js";
 import { FormatVnTimeMsg } from "#share/display.js";
-import { CommentPageInfo, CommentsProcessingGraphqlResult, SocialFbComment, SocialFbMention } from "./fb.types";
+import {
+  CommentPageInfo,
+  CommentsProcessingGraphqlResult,
+  SocialFbComment,
+  SocialFbMention,
+} from "./fb.types";
 import {
   extractCommentFromRawJson,
   extractFanpagePostsFromRawJson,
@@ -187,7 +200,7 @@ export default class FbScraperService {
         const cookieStr = await getCookiesFromCurrentPage(page);
         const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
           await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-        const processedBatchFbData = await fetchAndProcessBatchGqlData(
+        const processedBatchFbData = await fetchAndProcessMainGqlData(
           fbRequestOptionsBuilderForCallApi,
           logger,
         );
@@ -269,9 +282,134 @@ export default class FbScraperService {
     }
   }
 
+  // Scrape Group Posts From Discussion Feed
+  public async scrapeGroupPostsFromDiscussionFeed(groupURL: string, numberOfPosts: number | 20): Promise<SocialFbMention[]> {
+    let browser: Browser | null = null;
+
+    // Open browser
+    try {
+      browser = await getMyCustomRemoteBrowser();
+      const page: Page = await browser.newPage();
+      const client: CDPSession = await this.setupScrapingEnviroment(page);
+
+      logger.info(`Navigating to ${groupURL}`);
+
+      await page.goto(groupURL, {
+        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
+        timeout: PPT_TIMEOUT_DEFAULT,
+      });
+
+      // scroll to capture GraphQL
+      this.humanScroll(page);
+
+      const { headers, bodyRaw } = await WaitNextGraphQL(
+        client,
+        FB_GROUP_API_REQUEST_FRIENDLY_NAME,
+      );
+      logger.info(
+        `Capture Graphql Request '${FB_GROUP_API_REQUEST_FRIENDLY_NAME}'`,
+      );
+
+      const cookieStr = await getCookiesFromCurrentPage(page);
+
+      // paginate group posts via api
+      const cleanedPosts: SocialFbMention[] = await this.paginateGroupDiscussionFeedViaAPI(
+        headers,
+        bodyRaw,
+        cookieStr,
+        numberOfPosts);
+      logger.info("📊 Final Total Collected Posts: " + cleanedPosts.length);
+
+      return cleanedPosts;
+    } catch (error) {
+      console.error("Error in scrapeGroupPosts:", error);
+      return [];
+    } finally {
+      if (browser) {
+        await browser.disconnect();
+      }
+    }
+  }
+
+  // paginateGroupDiscussionFeedViaAPI
+  private async paginateGroupDiscussionFeedViaAPI(
+    header: Record<string, string>,
+    body: string,
+    cookie: string,
+    MAX_COUNT_POSTS: number): Promise<SocialFbMention[]> {
+    let countPosts = 0;
+      let hasNextPage: boolean = true;
+      let currentCursor: string | null = null;
+      const cleanedPosts: SocialFbMention[] = [];
+
+      while(countPosts < MAX_COUNT_POSTS && hasNextPage) {
+        logger.info(`🚀 Processing Batch... (Current count: ${countPosts})`);
+
+        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
+          await BuildFbRequestOptionsForCallApi_V3(header, body, cookie, currentCursor);
+
+        const batchGqlArr: any[] = await fetchAndProcessBatchGqlData(
+          fbRequestOptionsBuilderForCallApi,
+          logger,
+        );
+        if (!batchGqlArr || batchGqlArr.length === 0) {
+          logger.warn("⚠️ No data received from API. Stop loop!");
+          break;
+        }
+        const chunkEdges = batchGqlArr[0];
+        console.log(chunkEdges)
+        try {
+            const jsonData =
+              typeof chunkEdges === "string"
+                ? JSON.parse(chunkEdges)
+                : chunkEdges;
+
+            const edges = jsonData?.data?.node?.group_feed?.edges || [];
+            if (Array.isArray(edges)) {
+              const batchCleanPosts = edges
+                .map((edge: any) => normalizeFacebookPost(edge.node))
+                .filter((post): post is SocialFbMention => post !== null); // Lọc null
+
+              cleanedPosts.push(...batchCleanPosts);
+
+              countPosts += batchCleanPosts.length;
+              logger.info(`✅ Found new ${batchCleanPosts.length} posts.`);
+            }
+          } catch (parseError) {
+            logger.error(
+              "Lỗi khi parse batch GraphQL data:",
+              parseError as any,
+            );
+        }
+
+        logger.info("Current Posts Length: " + cleanedPosts.length);
+
+        const pageInfoElement = batchGqlArr[batchGqlArr.length - 1];
+        const pageInfoObject = pageInfoElement.data?.page_info;
+
+        if(pageInfoObject) {
+          currentCursor = pageInfoObject.end_cursor;
+          hasNextPage = pageInfoObject.has_next_page;
+        }
+
+        if (!currentCursor) {
+          logger.warn("⚠️ New end cursor not found. There is possibility to exhaust data.");
+          hasNextPage = false;
+        }
+
+        logger.info(`📊 Current total Collected: ${countPosts}/${MAX_COUNT_POSTS} posts.`);
+
+        // chill delay avoid rate limiting from fb
+        if (hasNextPage && countPosts < MAX_COUNT_POSTS) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      return cleanedPosts;
+  }
+
   /**
-   * Check xem Fanpage hiện tại có tích xanh không.
-   * Logic: Tìm thẻ h1 (Tên Page) -> Quét các SVG xung quanh xem có cái nào title là Verified không.
+   * Check Fanpage is verified or not?.
    */
   public async checkIsFanpageVerified(page: Page): Promise<boolean> {
     return await page.evaluate(() => {
@@ -417,7 +555,7 @@ export default class FbScraperService {
         const cookieStr = await getCookiesFromCurrentPage(page);
         const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
           await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-        const processedBatchFbData = await fetchAndProcessBatchGqlData(
+        const processedBatchFbData = await fetchAndProcessMainGqlData(
           fbRequestOptionsBuilderForCallApi,
           logger,
         );
@@ -571,7 +709,7 @@ export default class FbScraperService {
           bodyRaw,
           cookieStr,
         );
-        const processedBatchData = await fetchAndProcessBatchGqlData(
+        const processedBatchData = await fetchAndProcessMainGqlData(
           fbRequestOptions,
           logger,
         );
@@ -610,79 +748,18 @@ export default class FbScraperService {
     }
   }
 
+  // scrape comments of post in fanpage
   public async scrapeCommentsOfPostInFanpage(
     targetURL: string,
     postId?: string,
   ): Promise<SocialFbComment[]> {
     let browser: Browser | null = null;
-    const scrapeStartTime = Date.now();
-    const cleanedComments: SocialFbComment[] = [];
-
-    const processGraphQLData = async (dataPayload: any, currentPage: Page) => {
-      const { headers, bodyRaw } = dataPayload;
-      logger.info(`Captured ${FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
-
-      const cookieStr = await getCookiesFromCurrentPage(currentPage);
-      const fbRequestOptions = await BuildFbRequestOptionsForCallApi(
-        headers,
-        bodyRaw,
-        cookieStr,
-      );
-      const processedBatchData = await fetchAndProcessBatchGqlData(
-        fbRequestOptions,
-        logger,
-      );
-
-      if (processedBatchData) {
-        try {
-          const jsonData =
-            typeof processedBatchData === "string"
-              ? JSON.parse(processedBatchData)
-              : processedBatchData;
-          const batchComments: SocialFbComment[] = extractCommentFromRawJson(
-            jsonData,
-            postId,
-          );
-
-          batchComments.forEach((data) => cleanedComments.push(data));
-          logger.info(`Cleaned and added ${batchComments.length} comments.`);
-        } catch (parseError) {
-          console.error("Error parsing GraphQL data:", parseError);
-        }
-      }
-    };
 
     // Open browser
     try {
       browser = await getMyCustomRemoteBrowser();
       const page: Page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      );
-
-      await page.setRequestInterception(true);
-      page.on(PPT_REQUEST_KEY, (req) => req.continue());
-
-      // Open CDP Network domain to get postData fallback
-      const client = await page.target().createCDPSession();
-
-      // set the viewport of browser
-
-      const { windowId } = await client.send("Browser.getWindowForTarget");
-      await client.send("Browser.setWindowBounds", {
-        windowId,
-        bounds: { windowState: "fullscreen" },
-      });
-
-      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
-
-      await page.setViewport({
-        width: 0,
-        height: 0,
-        isMobile: false,
-        hasTouch: false,
-        deviceScaleFactor: 1,
-      });
+      const client: CDPSession = await this.setupScrapingEnviroment(page);
 
       await page.goto(targetURL, {
         waitUntil: PPT_WAIT_UNTIL_DEFAULT,
@@ -692,264 +769,17 @@ export default class FbScraperService {
       // toggle button from "Most Relevant" -> "All Comments"
       this.switchCommentsViewMode(page);
 
-      // await new Promise((r) => setTimeout(r, 2000));
-
-      for (let i = 0; i < 2; i++) {
-        const switchTrapPromise = Promise.race([
-          WaitNextGraphQL(
-            client,
-            FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME,
-          ).then((res) => ({
-            status: "SUCCESS",
-            data: res,
-          })),
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
-          ),
-        ]);
-
-        await page.evaluate(async () => {
-          const dialog = document.querySelector('div[role="dialog"]');
-          let target = dialog as HTMLElement;
-
-          if (dialog) {
-            const scrollableChild = Array.from(
-              dialog.querySelectorAll("*"),
-            ).find((el) => {
-              const e = el as HTMLElement;
-              const style = window.getComputedStyle(e);
-              return (
-                e.scrollHeight > e.clientHeight &&
-                ["auto", "scroll"].includes(style.overflowY)
-              );
-            });
-            if (scrollableChild) target = scrollableChild as HTMLElement;
-          } else {
-            target = document.documentElement;
-          }
-
-          target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
-
-          await new Promise((resolve) => setTimeout(resolve, 800));
-
-          target.scrollTop = target.scrollHeight - 10;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          target.scrollTop = target.scrollHeight;
-        });
-
-        const switchResult = (await switchTrapPromise) as {
-          status: string;
-          data: any;
-        };
-        console.log("\n\n\nCurrent switch result: ", switchResult);
-        if (switchResult.status === "TIMEOUT" || !switchResult.data) {
-          console.warn(
-            `Loop ${i + 1}: No new GraphQL request captured (Timeout).`,
-          );
-          continue;
-        }
-        await processGraphQLData(switchResult.data, page);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-
-      logger.info(`Collected ${cleanedComments.length} comments`);
-      return cleanedComments;
-    } catch (error) {
-      console.error("Error in scrapeCommentsOfPost:", error);
-      return [];
-    } finally {
-      if (browser) {
-        await browser.disconnect();
-      }
-    }
-  }
-
-  public async scrapeCommentsOfPostInFanpage_V2(
-    targetURL: string,
-    postId?: string,
-  ): Promise<SocialFbComment[]> {
-    let browser: Browser | null = null;
-    const scrapeStartTime = Date.now();
-    const cleanedComments: SocialFbComment[] = [];
-
-    const processGraphQLData = async (
-      headers: any, 
-      bodyRaw: string,
-      currentPage: Page,
-      nextCursor?: string,
-    ) => {
-      logger.info(`Captured ${FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
-
-      const cookieStr = await getCookiesFromCurrentPage(currentPage);
-      const fbRequestOptions = await BuildFbRequestOptionsForCallApi_V2(
-        headers,
-        bodyRaw,
-        cookieStr,
-        nextCursor
-      );
-      const processedBatchData = await fetchAndProcessBatchGqlData(
-        fbRequestOptions,
-        logger,
+      // capture graphql and extract header/body
+      const { headerRaw, bodyRaw } = await this.captureBootstrapPayload(
+        page,
+        client,
+        "CommentsListComponentsPaginationQuery",
       );
 
-      let commentsResult: CommentsProcessingGraphqlResult = {
-        comments: [],
-        hasNextPage: false,
-        endCursor: null,
-      };
+      // paginated all comments
+      const cleanedComments: SocialFbComment[] =
+        await this.paginatedAllComments(headerRaw, bodyRaw, page, postId);
 
-      if (processedBatchData) {
-        try {
-          const jsonData =
-            typeof processedBatchData === "string"
-              ? JSON.parse(processedBatchData)
-              : processedBatchData;
-
-          const batchComments: SocialFbComment[] = extractCommentFromRawJson(
-            jsonData,
-            postId,
-          );
-
-          commentsResult.comments = batchComments;
-
-          // extract page info
-          const pageInfo: CommentPageInfo = extractPageInfoOfComments(jsonData);
-          commentsResult.hasNextPage = pageInfo.hasNextPage;
-          commentsResult.endCursor = pageInfo.endCursor;
-        } catch (parseError) {
-          console.error("Error parsing GraphQL data:", parseError);
-        }
-      }
-
-      return commentsResult;
-    };
-
-    // Open browser
-    try {
-      browser = await getMyCustomRemoteBrowser();
-      const page: Page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      );
-
-      await page.setRequestInterception(true);
-      page.on(PPT_REQUEST_KEY, (req) => req.continue());
-
-      // Open CDP Network domain to get postData fallback
-      const client = await page.target().createCDPSession();
-
-      // set the viewport of browser
-
-      const { windowId } = await client.send("Browser.getWindowForTarget");
-      await client.send("Browser.setWindowBounds", {
-        windowId,
-        bounds: { windowState: "fullscreen" },
-      });
-
-      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
-
-      await page.setViewport({
-        width: 0,
-        height: 0,
-        isMobile: false,
-        hasTouch: false,
-        deviceScaleFactor: 1,
-      });
-
-      await page.goto(targetURL, {
-        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
-        timeout: PPT_TIMEOUT_DEFAULT,
-      });
-
-      // toggle button from "Most Relevant" -> "All Comments"
-      this.switchCommentsViewMode(page);
-
-      const switchTrapPromise = Promise.race([
-        WaitNextGraphQL(
-          client,
-          "CommentsListComponentsPaginationQuery",
-        ).then((res) => ({
-          status: "SUCCESS",
-          data: res,
-        })),
-        new Promise((resolve) =>
-          setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
-        ),
-      ]);
-
-      await page.evaluate(async () => {
-        const dialog = document.querySelector('div[role="dialog"]');
-        let target = dialog as HTMLElement;
-
-        if (dialog) {
-          const scrollableChild = Array.from(
-            dialog.querySelectorAll("*"),
-          ).find((el) => {
-            const e = el as HTMLElement;
-            const style = window.getComputedStyle(e);
-            return (
-              e.scrollHeight > e.clientHeight &&
-              ["auto", "scroll"].includes(style.overflowY)
-            );
-          });
-          if (scrollableChild) target = scrollableChild as HTMLElement;
-        } else {
-          target = document.documentElement;
-        }
-
-        target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
-
-        await new Promise((resolve) => setTimeout(resolve, 800));
-
-        target.scrollTop = target.scrollHeight - 10;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        target.scrollTop = target.scrollHeight;
-      });
-
-      const switchResult = (await switchTrapPromise) as {
-        status: string;
-        data: any;
-      };
-      // console.log("\n\n\nCurrent switch result: ", switchResult);
-
-      if (switchResult.status === "TIMEOUT" || !switchResult.data) {
-        throw new Error("Không bắt được gói tin khởi tạo GraphQL");
-      }
-
-      const rootHeaders = switchResult.data.headers;
-      const rootBodyRaw = switchResult.data.bodyRaw;
-
-      let currentCommentsResult: CommentsProcessingGraphqlResult =
-        await processGraphQLData(rootHeaders, rootBodyRaw, page);
-
-      currentCommentsResult.comments.forEach(c => cleanedComments.push(c));
-
-      let loopCount = 1;
-      const MAX_API_LOOPS = 20;
-
-      console.log("Has next page: ", currentCommentsResult.hasNextPage);
-
-      while(currentCommentsResult.hasNextPage &&
-        currentCommentsResult.endCursor &&
-        loopCount < MAX_API_LOOPS) {
-        logger.info(`[API Request ${loopCount}] Fetching next comments using cursor:
-            ${currentCommentsResult.endCursor.substring(0, 15)}...`);
-
-        currentCommentsResult = await processGraphQLData(
-          rootHeaders,
-          rootBodyRaw,
-          page,
-          currentCommentsResult.endCursor
-        )
-
-        currentCommentsResult.comments.forEach(c => cleanedComments.push(c));
-        loopCount++;
-
-        // prevent rate limit from Facebook
-        await new Promise(r => setTimeout(r, 500));
-      }
-
-      logger.info(`Finished API Pagination. Total loops: ${loopCount}. Total comments: ${cleanedComments.length}`);
       return cleanedComments;
     } catch (error) {
       console.error("Error in scrapeCommentsOfPost:", error);
@@ -1122,7 +952,7 @@ export default class FbScraperService {
               bodyRaw,
               cookieStr,
             );
-            const processedBatchData = await fetchAndProcessBatchGqlData(
+            const processedBatchData = await fetchAndProcessMainGqlData(
               fbRequestOptions,
               logger,
             );
@@ -1183,129 +1013,6 @@ export default class FbScraperService {
     }
   }
 
-  public async scrapeGroupPosts(
-    projectId: string,
-    groupId: string | number,
-    scrollTimes: number = TWENTY,
-    token: string,
-  ): Promise<ScrapeResultParams> {
-    let browser: Browser | null = null;
-    const scrapeStartTime = Date.now();
-
-    const cleanedPosts: SocialFbMention[] = [];
-
-    // const
-    try {
-      browser = await getMyCustomRemoteBrowser();
-      const page: Page = await browser.newPage();
-      await page.setRequestInterception(true);
-      page.on(PPT_REQUEST_KEY, (req) => req.continue());
-
-      // Open CDP Network domain to get postData fallback
-      const client = await page.target().createCDPSession();
-
-      const { windowId } = await client.send("Browser.getWindowForTarget");
-      await client.send("Browser.setWindowBounds", {
-        windowId,
-        bounds: { width: 1920, height: 1080, windowState: "normal" },
-      });
-
-      await client.send(CDP_NETWORK_ENABLE_TO_SEND);
-
-      await page.setViewport({
-        width: 1920,
-        height: 1080,
-        isMobile: false,
-        hasTouch: false,
-        deviceScaleFactor: 1,
-      });
-
-      const groupURL: string = `${FB_DEFAULT_ENDPOINT}/${FB_ENDPOINT_GROUP_KEY}/${groupId}?${QUERY_PARAMS_CHRONOLOGICAL_ACTIVITY}`;
-      logger.info(`Đang điều hướng tới ${groupURL}`);
-
-      await page.goto(groupURL, {
-        waitUntil: PPT_WAIT_UNTIL_DEFAULT,
-        timeout: PPT_TIMEOUT_DEFAULT,
-      });
-
-      for (let i = 0; i < scrollTimes; i++) {
-        await page.evaluate(() => {
-          window.scrollTo({ top: document.body.scrollHeight });
-        });
-
-        const { headers, bodyRaw } = await WaitNextGraphQL(
-          client,
-          FB_GROUP_API_REQUEST_FRIENDLY_NAME,
-        );
-        logger.info(`Bắt được request '${FB_GROUP_API_REQUEST_FRIENDLY_NAME}'`);
-
-        const cookieStr = await getCookiesFromCurrentPage(page);
-        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
-          await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-        const processedBatchFbData = await fetchAndProcessBatchGqlData(
-          fbRequestOptionsBuilderForCallApi,
-          logger,
-        );
-
-        if (processedBatchFbData) {
-          try {
-            const jsonData =
-              typeof processedBatchFbData === "string"
-                ? JSON.parse(processedBatchFbData)
-                : processedBatchFbData;
-
-            const edges = jsonData?.data?.node?.group_feed?.edges || [];
-            if (Array.isArray(edges)) {
-              const batchCleanPosts = edges
-                .map((edge: any) => normalizeFacebookPost(edge.node))
-                .filter((post): post is SocialFbMention => post !== null); // Lọc null
-
-              cleanedPosts.push(...batchCleanPosts);
-
-              logger.info(
-                `Đã làm sạch và thêm ${batchCleanPosts.length} bài viết.`,
-              );
-            }
-          } catch (parseError) {
-            logger.error(
-              "Lỗi khi parse batch GraphQL data:",
-              parseError as any,
-            );
-          }
-        }
-      }
-
-      const scrapeEndTime = Date.now();
-      const scrapeDurationInMs = scrapeEndTime - scrapeStartTime;
-
-      logger.info(`Thời gian bắt đầu: ${FormatVnTimeMsg(scrapeStartTime)}`);
-      logger.info(`Thời gian kết thúc: ${FormatVnTimeMsg(scrapeEndTime)}`);
-      logger.info(
-        `Tổng thời gian thu thập dữ liệu: ${(scrapeDurationInMs / 1000).toFixed(2)} giây.`,
-      );
-
-      var scrapePerformanceContextInfo: ScrapePerformanceContextParams = {
-        scrapeStartTime,
-        scrapeEndTime,
-        scrapeDurationInMs,
-      };
-
-      var scrapeResult: ScrapeResultParams = {
-        scrapePerformance: scrapePerformanceContextInfo,
-        scrapeData: cleanedPosts,
-      };
-
-      return scrapeResult as ScrapeResultParams;
-    } catch (error) {
-      throw error;
-    } finally {
-      if (browser) {
-        logger.info("Hoàn thành, đóng kết nối trình duyệt");
-        await browser.disconnect();
-      }
-    }
-  }
-
   private async switchCommentsViewMode(page: Page) {
     try {
       const triggerBtnXPath =
@@ -1347,6 +1054,202 @@ export default class FbScraperService {
   }
 
   private async switchCommentsViewModeInReelVideo(page: Page) {}
+
+  // setup scraping environment
+  private async setupScrapingEnviroment(page: Page): Promise<CDPSession> {
+    await page.setUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    );
+
+    await page.setRequestInterception(true);
+    page.on(PPT_REQUEST_KEY, (req) => req.continue());
+
+    // Open CDP Network domain to get postData fallback
+    const client = await page.target().createCDPSession();
+
+    const { windowId } = await client.send("Browser.getWindowForTarget");
+    await client.send("Browser.setWindowBounds", {
+      windowId,
+      bounds: { windowState: "fullscreen" },
+    });
+
+    await client.send(CDP_NETWORK_ENABLE_TO_SEND);
+
+    // set the viewport of browser
+    await page.setViewport({
+      width: 0,
+      height: 0,
+      isMobile: false,
+      hasTouch: false,
+      deviceScaleFactor: 1,
+    });
+
+    return client;
+  }
+
+  // capture payload of graphql
+  private async captureBootstrapPayload(
+    page: Page,
+    client: CDPSession,
+    fbApiFriendlyName: string,
+  ): Promise<{ headerRaw: string; bodyRaw: string }> {
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const switchTrapPromise = Promise.race([
+      WaitNextGraphQL(client, fbApiFriendlyName).then((res) => ({
+        status: "SUCCESS",
+        data: res,
+      })),
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ status: "TIMEOUT", data: null }), 5000),
+      ),
+    ]);
+
+    await page.evaluate(async () => {
+      const dialog = document.querySelector('div[role="dialog"]');
+      let target = dialog as HTMLElement;
+
+      if (dialog) {
+        const scrollableChild = Array.from(dialog.querySelectorAll("*")).find(
+          (el) => {
+            const e = el as HTMLElement;
+            const style = window.getComputedStyle(e);
+            return (
+              e.scrollHeight > e.clientHeight &&
+              ["auto", "scroll"].includes(style.overflowY)
+            );
+          },
+        );
+        if (scrollableChild) target = scrollableChild as HTMLElement;
+      } else {
+        target = document.documentElement;
+      }
+
+      target.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      target.scrollTop = target.scrollHeight - 10;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      target.scrollTop = target.scrollHeight;
+    });
+
+    const switchResult = (await switchTrapPromise) as {
+      status: string;
+      data: any;
+    };
+
+    if (switchResult.status === "TIMEOUT" || !switchResult.data) {
+      throw new Error("Không bắt được gói tin khởi tạo GraphQL");
+    }
+
+    console.log(switchResult);
+
+    return {
+      headerRaw: switchResult.data.headers,
+      bodyRaw: switchResult.data.bodyRaw,
+    };
+  }
+
+  // paginated all comments
+  private async paginatedAllComments(
+    headerRaw: string,
+    bodyRaw: string,
+    currentPage: Page,
+    postId?: string,
+    nextCursor?: string,
+  ) {
+    const processGraphQLData = async (
+      headers: any,
+      bodyRaw: string,
+      currentPage: Page,
+      nextCursor?: string,
+    ) => {
+      logger.info(`Captured ${FB_FANPAGE_COMMENT_API_REQUEST_FRIENDLY_NAME}`);
+
+      const cookieStr = await getCookiesFromCurrentPage(currentPage);
+      const fbRequestOptions = await BuildFbRequestOptionsForCallApi_V2(
+        headers,
+        bodyRaw,
+        cookieStr,
+        nextCursor,
+      );
+      const processedBatchData = await fetchAndProcessMainGqlData(
+        fbRequestOptions,
+        logger,
+      );
+
+      let commentsResult: CommentsProcessingGraphqlResult = {
+        comments: [],
+        hasNextPage: false,
+        endCursor: null,
+      };
+
+      if (processedBatchData) {
+        try {
+          const jsonData =
+            typeof processedBatchData === "string"
+              ? JSON.parse(processedBatchData)
+              : processedBatchData;
+
+          const batchComments: SocialFbComment[] = extractCommentFromRawJson(
+            jsonData,
+            postId,
+          );
+
+          commentsResult.comments = batchComments;
+
+          // extract page info
+          const pageInfo: CommentPageInfo = extractPageInfoOfComments(jsonData);
+          commentsResult.hasNextPage = pageInfo.hasNextPage;
+          commentsResult.endCursor = pageInfo.endCursor;
+        } catch (parseError) {
+          console.error("Error parsing GraphQL data:", parseError);
+        }
+      }
+
+      return commentsResult;
+    };
+
+    const cleanedComments: SocialFbComment[] = [];
+    let currentCommentsResult: CommentsProcessingGraphqlResult =
+      await processGraphQLData(headerRaw, bodyRaw, currentPage);
+
+    currentCommentsResult.comments.forEach((c) => cleanedComments.push(c));
+
+    let loopCount = 1;
+    const MAX_API_LOOPS = 20;
+
+    console.log("Has next page: ", currentCommentsResult.hasNextPage);
+
+    while (
+      currentCommentsResult.hasNextPage &&
+      currentCommentsResult.endCursor &&
+      loopCount < MAX_API_LOOPS
+    ) {
+      logger.info(`[API Request ${loopCount}] Fetching next comments using cursor:
+            ${currentCommentsResult.endCursor.substring(0, 15)}...`);
+
+      currentCommentsResult = await processGraphQLData(
+        headerRaw,
+        bodyRaw,
+        currentPage,
+        currentCommentsResult.endCursor,
+      );
+
+      currentCommentsResult.comments.forEach((c) => cleanedComments.push(c));
+      loopCount++;
+
+      // prevent rate limit from Facebook
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    logger.info(
+      `Finished API Pagination. Total loops: ${loopCount}. Total comments: ${cleanedComments.length}`,
+    );
+
+    return cleanedComments;
+  }
 
   private async humanScroll(page: Page) {
     try {

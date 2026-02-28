@@ -25,7 +25,7 @@ import {
   ONE_HUNDRED,
 } from "../../constants";
 import pino from "pino";
-import { fetchAndProcessBatchGqlData, getCookiesFromCurrentPage } from "#share/api.js";
+import { fetchAndProcessMainGqlData, getCookiesFromCurrentPage } from "#share/api.js";
 import { getMyCustomRemoteBrowser } from "#share/browser.js";
 import { FormatVnTimeMsg } from "#share/display.js";
 
@@ -65,7 +65,7 @@ puppeteerExtra.use(StealthPlugin());
 
     const cookieStr = await getCookiesFromCurrentPage(page);
     const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions = await BuildFbRequestOptionsForCallApi(headers, bodyRaw, cookieStr);
-    const processedBatchFbData = await fetchAndProcessBatchGqlData(fbRequestOptionsBuilderForCallApi, logger);
+    const processedBatchFbData = await fetchAndProcessMainGqlData(fbRequestOptionsBuilderForCallApi, logger);
 
     if (processedBatchFbData) {
       rawDataAfterFetched.push(processedBatchFbData);

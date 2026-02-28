@@ -153,6 +153,11 @@ export interface ScrapeRequest {
   year?: number;
 }
 
+export interface ScrapeGroupRequest {
+  groupURL: string;
+  numberOfPosts: number | 25;
+}
+
 export interface ScrapePerformanceContextParams {
   scrapeStartTime: number;
   scrapeEndTime: number;

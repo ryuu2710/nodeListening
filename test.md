@@ -49,3 +49,16 @@ MToxNzcyMTYzOTYwOgF_HxJKIPNTpT2axy5B_rGDsoY8Z1TQthwRWqygxvQ6r6C0yRMi20UNnUlUBDX2
 MToxNzcyMTYzOTY5OgF_ibxQP5GhHYmMjoRCEalU06XgdG7MmH-A1Ea8eqMme6k2Fa5tjhPRbNpzWfOaSaabJAfaM3mpcMP9ScwC_jzJHqOQP994vehyC3ArNPQxysSBDUbKp4qkvsz2yOqDdbYXdzzkwnnqtX47gQYXle_Z3UBOIykWMaCn1eTqjaVViR-ZfMVTjA7y6H9ssLG21_C2umutwz3aozkwLVEw2NEM5HSGYu11t42Ga-3sc6DSx7Bq_piNhNAgYxuyDVX-SC3RJr--M13uRdQBM2ZlU-uEdAvSBmeA7usjWP0jQc9VKyk_2aIG7YOLtyECkzCPdC8wedV9KDpbW6y3uDnvT6NIKa1PkmeTV0vg5DxpODkggPAn
 
 ```
+
+
+# End Cursor of Post in Group
+Cg8TZXhpc3RpbmdfdW5pdF9jb3VudAICDwtyZWFsX2N1cnNvcg+fQVFIU0QxNTRtdWtpVzlCWmJvNFFNMGowS2ZrTjFPWDNiYkc4MW1KZVgtbmhaOVhUclEzZVNYLUx6d01nUVYxaWpDVnZCWU0yeXR5YkR0cldzSFhSbWlfMDd3OmV5SXdJam94TnpjeU1qWXhOekUxTENJeElqbzNOamd5TENJeklqb3dMQ0kwSWpveExDSTFJam95TENJMklqb3RNWDA9DxNoZWFkZXJfZ2xvYmFsX2NvdW50AgEPEm1haW5fZmVlZF9wb3NpdGlvbgICDw1mZWVkX29yZGVyaW5nDw1hdHRhY2hlZF90aW1lDxNpc19ldmVyZ3JlZW5fY3Vyc29yEQAPImlzX29mZmxpbmVfYWdncmVnYXRlZF9wb3N0c19jdXJzb3IRAA8SZ3JvdXBfZmVlZF92ZXJzaW9uDwJWMg8QZGVtb3RlZF9wb3N0X2lkcwoBAQ==
+
+
+# Headers Error in group posts
+'sec-ch-ua': 'undefined',
+'sec-ch-ua-full-version-list': 'undefined',
+'sec-ch-ua-mobile': 'undefined',
+'sec-ch-ua-model': 'undefined',
+'sec-ch-ua-platform': 'undefined',
+'sec-ch-ua-platform-version': 'undefined',
