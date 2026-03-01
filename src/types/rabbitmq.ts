@@ -6,10 +6,12 @@ export interface ScrapedPostMessage {
   contentType: 'POST' | 'COMMENT';
   
   sourceUniqueId: string;     // post ID
+  socialUrl: string;
   parentId?: string;
   
-  authorName: string;
   authorId: string;
+  authorName: string;
+  authorUrl: string;
   content: string;
   publishedAt: string;         // ISO String 8601 (2026-03-01T12:00:00Z)
   platformData: {

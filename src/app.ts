@@ -49,7 +49,7 @@ export default class App {
       await rabbitMQService.startLocalConsumerForTesting();
 
       // send a test message to test the outgoing stream connection.
-      await rabbitMQService.publishData({
+      await rabbitMQService.publishScrapingData({
         test_message: "Hello RabbitMQ",
         timestamp: new Date().toISOString(),
       });

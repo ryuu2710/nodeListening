@@ -69,8 +69,7 @@ puppeteerExtra.use(StealthPlugin());
 
 @injectable()
 export default class FbScraperService {
-  constructor(
-  ) {}
+  constructor() {}
 
   public async scrapeGroupPostsByFilterParams(
     projectId: string,
@@ -287,7 +286,10 @@ export default class FbScraperService {
   }
 
   // Scrape Group Posts From Discussion Feed
-  public async scrapeGroupPostsFromDiscussionFeed(groupURL: string, numberOfPosts: number | 20): Promise<SocialFbMention[]> {
+  public async scrapeGroupPostsFromDiscussionFeed(
+    groupURL: string,
+    numberOfPosts: number | 20,
+  ): Promise<SocialFbMention[]> {
     let browser: Browser | null = null;
 
     // Open browser
@@ -317,11 +319,13 @@ export default class FbScraperService {
       const cookieStr = await getCookiesFromCurrentPage(page);
 
       // paginate group posts via api
-      const cleanedPosts: SocialFbMention[] = await this.paginateGroupDiscussionFeedViaAPI(
-        headers,
-        bodyRaw,
-        cookieStr,
-        numberOfPosts);
+      const cleanedPosts: SocialFbMention[] =
+        await this.paginateGroupDiscussionFeedViaAPI(
+          headers,
+          bodyRaw,
+          cookieStr,
+          numberOfPosts,
+        );
       logger.info("📊 Final Total Collected Posts: " + cleanedPosts.length);
 
       return cleanedPosts;
@@ -340,106 +344,133 @@ export default class FbScraperService {
     header: Record<string, string>,
     body: string,
     cookie: string,
-    MAX_COUNT_POSTS: number): Promise<SocialFbMention[]> {
+    MAX_COUNT_POSTS: number,
+  ): Promise<SocialFbMention[]> {
     let countPosts = 0;
-      let hasNextPage: boolean = true;
-      let currentCursor: string | null = null;
-      const cleanedPosts: SocialFbMention[] = [];
+    let hasNextPage: boolean = true;
+    let currentCursor: string | null = null;
+    const cleanedPosts: SocialFbMention[] = [];
 
-      await rabbitMQService.connect();
+    await rabbitMQService.connect();
 
-      while(countPosts < MAX_COUNT_POSTS && hasNextPage) {
-        logger.info(`🚀 Processing Batch... (Current count: ${countPosts})`);
+    while (countPosts < MAX_COUNT_POSTS && hasNextPage) {
+      logger.info(`🚀 Processing Batch... (Current count: ${countPosts})`);
 
-        const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
-          await BuildFbRequestOptionsForCallApi_V3(header, body, cookie, currentCursor);
-
-        const batchGqlArr: any[] = await fetchAndProcessBatchGqlData(
-          fbRequestOptionsBuilderForCallApi,
-          logger,
+      const fbRequestOptionsBuilderForCallApi: FacebookFetchOptions =
+        await BuildFbRequestOptionsForCallApi_V3(
+          header,
+          body,
+          cookie,
+          currentCursor,
         );
-        if (!batchGqlArr || batchGqlArr.length === 0) {
-          logger.warn("⚠️ No data received from API. Stop loop!");
-          break;
-        }
-        const chunkEdges = batchGqlArr[0];
-        console.log(chunkEdges)
-        try {
-            const jsonData =
-              typeof chunkEdges === "string"
-                ? JSON.parse(chunkEdges)
-                : chunkEdges;
 
-            const edges = jsonData?.data?.node?.group_feed?.edges || [];
-            if (Array.isArray(edges)) {
-              const batchCleanPosts = edges
-                .map((edge: any) => normalizeFacebookPost(edge.node))
-                .filter((post): post is SocialFbMention => post !== null); // Lọc null
+      const batchGqlArr: any[] = await fetchAndProcessBatchGqlData(
+        fbRequestOptionsBuilderForCallApi,
+        logger,
+      );
+      if (!batchGqlArr || batchGqlArr.length === 0) {
+        logger.warn("⚠️ No data received from API. Stop loop!");
+        break;
+      }
+      const chunkEdges = batchGqlArr[0];
+      console.log(chunkEdges);
+      try {
+        const jsonData =
+          typeof chunkEdges === "string" ? JSON.parse(chunkEdges) : chunkEdges;
 
-              for(const post of batchCleanPosts) {
-                const messagePayload: ScrapedPostMessage = {
-                  topicId: 'default-topic-id',
-                  platform: 'FACEBOOK_GROUP',
-                  contentType: 'POST',
-                  sourceUniqueId: post.id,
-                  authorName: post.authorMock?.name || 'Unknown',
-                  authorId: post.authorMock?.id || 'Unknown',
-                  content: post.content || '',
-                  publishedAt: post.publishedAt.toISOString() || new Date().toISOString(),
-                  platformData: {
-                    likes: post.stats?.likes || 0,
-                    comments: post.stats?.comments || 0,
-                    shares: post.stats?.shares || 0,
-                    url: post.url
-                  },
-                  scrapedAt: new Date().toISOString()
-                };
+        const edges = jsonData?.data?.node?.group_feed?.edges || [];
+        if (Array.isArray(edges)) {
+          const batchCleanPosts = edges
+            .map((edge: any) => normalizeFacebookPost(edge.node))
+            .filter((post): post is SocialFbMention => post !== null); // Lọc null
 
-                const isSent = await rabbitMQService.publishData(messagePayload);
-                if (isSent) {
-                  // Chỉ dùng logger.debug để không làm rác file log chính
-                  logger.debug(`📤 Đã đẩy Post [${post.id}] vào RabbitMQ.`);
-                } else {
-                  logger.error(`❌ Đẩy Post [${post.id}] thất bại. Cần lưu dự phòng!`);
-                }
-              }
+          for (const post of batchCleanPosts) {
+            const messagePayload: ScrapedPostMessage = {
+              topicId: "22222222-2222-2222-2222-222222222222",
+              trackerId: "33333333-3333-3333-3333-333333333333",
+              platform: "FACEBOOK_GROUP",
+              contentType: "POST",
+              sourceUniqueId: post.id,
+              socialUrl: post.url,
+              authorName: post.authorMock?.name || "Unknown",
+              authorId: post.authorMock?.id || "Unknown",
+              authorUrl: post.author?.url || "Unknown",
+              content: post.content || "",
+              publishedAt:
+                post.publishedAt.toISOString() || new Date().toISOString(),
+              platformData: {
+                likes: post.stats?.likes || 0,
+                comments: post.stats?.comments || 0,
+                shares: post.stats?.shares || 0,
+                url: post.url,
+              },
+              scrapedAt: new Date().toISOString(),
+            };
 
-              cleanedPosts.push(...batchCleanPosts);
+            console.log(messagePayload);
 
-              countPosts += batchCleanPosts.length;
-              logger.info(`✅ Found new ${batchCleanPosts.length} posts.`);
+            const isSent = await rabbitMQService.publishScrapingData(messagePayload);
+            if (isSent) {
+              logger.debug(`📤 Pushed data of post [${post.id}] into RabbitMQ.`);
+            } else {
+              logger.error(
+                `❌ Push Post [${post.id}] fail. Need backup storage!`,
+              );
             }
-          } catch (parseError) {
-            logger.error(
-              "Lỗi khi parse batch GraphQL data:",
-              parseError as any,
-            );
+          }
+
+          const trackerPayload = {
+            trackerId: '33333333-3333-3333-3333-333333333333',
+            lastCursor: currentCursor,
+            status: 'COMPLETED',
+            scrapedAt: new Date().toISOString()
+          };
+
+          const isTrackerSent = await rabbitMQService.publishTrackerUpdate(trackerPayload);
+          if (isTrackerSent) {
+            logger.info(`📬 Cursor update report has been submitted. [${currentCursor?.substring(0, 10)}...] to Java successfully.`);
+          } else {
+            logger.error(`⚠️ Cursor report failed! The next attempt may repeat the same problem.`);
+          }
+
+          cleanedPosts.push(...batchCleanPosts);
+
+          countPosts += batchCleanPosts.length;
+          logger.info(`✅ Found new ${batchCleanPosts.length} posts.`);
         }
-
-        logger.info("Current Posts Length: " + cleanedPosts.length);
-
-        const pageInfoElement = batchGqlArr[batchGqlArr.length - 1];
-        const pageInfoObject = pageInfoElement.data?.page_info;
-
-        if(pageInfoObject) {
-          currentCursor = pageInfoObject.end_cursor;
-          hasNextPage = pageInfoObject.has_next_page;
-        }
-
-        if (!currentCursor) {
-          logger.warn("⚠️ New end cursor not found. There is possibility to exhaust data.");
-          hasNextPage = false;
-        }
-
-        logger.info(`📊 Current total Collected: ${countPosts}/${MAX_COUNT_POSTS} posts.`);
-
-        // chill delay avoid rate limiting from fb
-        if (hasNextPage && countPosts < MAX_COUNT_POSTS) {
-          await new Promise(r => setTimeout(r, 1000));
-        }
+      } catch (parseError) {
+        logger.error("Error when parsing batch GraphQL data:", parseError as any);
       }
 
-      return cleanedPosts;
+      logger.info("Current Posts Length: " + cleanedPosts.length);
+
+      const pageInfoChunk = batchGqlArr.find((chunk) => chunk?.data?.page_info);
+      const validPageInfo = pageInfoChunk?.data?.page_info;
+
+      if (validPageInfo && validPageInfo.end_cursor) {
+        if (validPageInfo.end_cursor === currentCursor) {
+          logger.warn("🛑 FB returns the exact same Cursor as the previous loop. Break the loop!");
+          break;
+        }
+        currentCursor = validPageInfo.end_cursor;
+        hasNextPage = validPageInfo.has_next_page;
+        // logger.info(`🔑 Bắt được Cursor mới: ${currentCursor.substring(0, 15)}...`);
+      } else {
+        logger.warn("🛑 No page_info found in the returned array. Stop scratching!");
+        break;
+      }
+
+      logger.info(
+        `📊 Current total Collected: ${countPosts}/${MAX_COUNT_POSTS} posts.`,
+      );
+
+      // chill delay avoid rate limiting from fb
+      if (hasNextPage && countPosts < MAX_COUNT_POSTS) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    return cleanedPosts;
   }
 
   /**
@@ -1176,8 +1207,6 @@ export default class FbScraperService {
     if (switchResult.status === "TIMEOUT" || !switchResult.data) {
       throw new Error("Không bắt được gói tin khởi tạo GraphQL");
     }
-
-    console.log(switchResult);
 
     return {
       headerRaw: switchResult.data.headers,

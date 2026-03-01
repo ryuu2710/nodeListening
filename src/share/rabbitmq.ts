@@ -5,6 +5,7 @@ class RabbitMQService {
   private connection: amqp.ChannelModel | null = null;
   private senderChannel: amqp.Channel | null = null;
   private readonly QUEUE_NAME = 'raw_social_posts';
+  private readonly QUEUE_TRACKER = 'tracker_updates';
 
   public async connect() {
     if (this.connection) return;
@@ -12,7 +13,11 @@ class RabbitMQService {
     try {
       this.connection = await amqp.connect('amqp://yuta2710:phucloi2710@localhost:5674/');
       this.senderChannel = await this.connection.createChannel();
+
       await this.senderChannel.assertQueue(this.QUEUE_NAME, {
+        durable: true
+      });
+      await this.senderChannel.assertQueue(this.QUEUE_TRACKER, {
         durable: true
       });
 
@@ -30,7 +35,7 @@ class RabbitMQService {
     }
   }
 
-  public async publishData(data: any): Promise<boolean> {
+  public async publishScrapingData(data: any): Promise<boolean> {
     if (!this.senderChannel) {
       logger.warn('⚠️ RabbitMQ is not connected. Data transfer will be skipped.');
       return false;
@@ -46,6 +51,20 @@ class RabbitMQService {
       return isSent;
     } catch (error) {
       logger.error('❌ Error when sending data to RabbitMQ:', error as any);
+      return false;
+    }
+  }
+
+  public async publishTrackerUpdate(trackerData: any): Promise<boolean> {
+    if (!this.senderChannel) return false;
+    try {
+      const buffer = Buffer.from(JSON.stringify(trackerData));
+      return this.senderChannel.sendToQueue(this.QUEUE_TRACKER, buffer, { 
+        persistent: true,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      logger.error('❌ Lỗi khi gửi cập nhật Tracker:', error as any);
       return false;
     }
   }

@@ -1,5 +1,5 @@
 import { url } from "inspector";
-import { SocialFbMention, SocialFbComment, CommentPageInfo } from "./fb.types";
+import { SocialFbMention, SocialFbComment, CommentPageInfo, SocialAuthor } from "./fb.types";
 import { logger } from "#share/logger.js";
 
 function getSafe<T>(obj: any, ...paths: (string | number)[][]): T | undefined {
@@ -79,6 +79,13 @@ export function normalizeFacebookPost(node: any): SocialFbMention | null {
     name: firstActor.name ?? "Unknown",
     is_anonymous: firstActor.__typename === "GroupAnonAuthorProfile",
   };
+
+  // data.node.group_feed.edges[0].node.comet_sections.content.story.actors[0].url
+  const authorV2: SocialAuthor = {
+    id: firstActor.id ?? "unknown",
+    name: firstActor.name ?? "Unknown",
+    url: firstActor.url ?? `https://www.facebook.com/${firstActor.id}`,
+  }
 
   // Stats & Reactions
   const feedback = getSafe<any>(node, [
@@ -172,6 +179,7 @@ export function normalizeFacebookPost(node: any): SocialFbMention | null {
     url,
     content,
     authorMock: author,
+    author: authorV2,
     stats,
     createdAtTs: ts,
     publishedAt: new Date(),
