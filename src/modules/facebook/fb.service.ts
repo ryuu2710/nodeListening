@@ -1,6 +1,6 @@
 import puppeteerExtra from "puppeteer-extra";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import { promises as fs } from "fs";
 import pino from "pino";
 import {
@@ -61,12 +61,16 @@ import {
 import { buildFbGroupSearchUrl } from "./fb.builder";
 import { logger } from "#share/logger.js";
 import { result } from "lodash";
+import { rabbitMQService } from "#share/rabbitmq.js";
+import { batch } from "googleapis/build/src/apis/batch";
+import { ScrapedPostMessage } from "#types/rabbitmq.js";
 
 puppeteerExtra.use(StealthPlugin());
 
 @injectable()
 export default class FbScraperService {
-  constructor() {}
+  constructor(
+  ) {}
 
   public async scrapeGroupPostsByFilterParams(
     projectId: string,
@@ -342,6 +346,8 @@ export default class FbScraperService {
       let currentCursor: string | null = null;
       const cleanedPosts: SocialFbMention[] = [];
 
+      await rabbitMQService.connect();
+
       while(countPosts < MAX_COUNT_POSTS && hasNextPage) {
         logger.info(`🚀 Processing Batch... (Current count: ${countPosts})`);
 
@@ -369,6 +375,34 @@ export default class FbScraperService {
               const batchCleanPosts = edges
                 .map((edge: any) => normalizeFacebookPost(edge.node))
                 .filter((post): post is SocialFbMention => post !== null); // Lọc null
+
+              for(const post of batchCleanPosts) {
+                const messagePayload: ScrapedPostMessage = {
+                  topicId: 'default-topic-id',
+                  platform: 'FACEBOOK_GROUP',
+                  contentType: 'POST',
+                  sourceUniqueId: post.id,
+                  authorName: post.authorMock?.name || 'Unknown',
+                  authorId: post.authorMock?.id || 'Unknown',
+                  content: post.content || '',
+                  publishedAt: post.publishedAt.toISOString() || new Date().toISOString(),
+                  platformData: {
+                    likes: post.stats?.likes || 0,
+                    comments: post.stats?.comments || 0,
+                    shares: post.stats?.shares || 0,
+                    url: post.url
+                  },
+                  scrapedAt: new Date().toISOString()
+                };
+
+                const isSent = await rabbitMQService.publishData(messagePayload);
+                if (isSent) {
+                  // Chỉ dùng logger.debug để không làm rác file log chính
+                  logger.debug(`📤 Đã đẩy Post [${post.id}] vào RabbitMQ.`);
+                } else {
+                  logger.error(`❌ Đẩy Post [${post.id}] thất bại. Cần lưu dự phòng!`);
+                }
+              }
 
               cleanedPosts.push(...batchCleanPosts);
 
