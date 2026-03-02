@@ -289,6 +289,8 @@ export default class FbScraperService {
   public async scrapeGroupPostsFromDiscussionFeed(
     groupURL: string,
     numberOfPosts: number | 20,
+    topicId: string,
+    trackerId: string
   ): Promise<SocialFbMention[]> {
     let browser: Browser | null = null;
 
@@ -325,6 +327,8 @@ export default class FbScraperService {
           bodyRaw,
           cookieStr,
           numberOfPosts,
+          topicId, 
+          trackerId
         );
       logger.info("📊 Final Total Collected Posts: " + cleanedPosts.length);
 
@@ -345,6 +349,8 @@ export default class FbScraperService {
     body: string,
     cookie: string,
     MAX_COUNT_POSTS: number,
+    topicId: string,
+    trackerId: string,
   ): Promise<SocialFbMention[]> {
     let countPosts = 0;
     let hasNextPage: boolean = true;
@@ -386,8 +392,8 @@ export default class FbScraperService {
 
           for (const post of batchCleanPosts) {
             const messagePayload: ScrapedPostMessage = {
-              topicId: "22222222-2222-2222-2222-222222222222",
-              trackerId: "33333333-3333-3333-3333-333333333333",
+              topicId,
+              trackerId,
               platform: "FACEBOOK_GROUP",
               contentType: "POST",
               sourceUniqueId: post.id,

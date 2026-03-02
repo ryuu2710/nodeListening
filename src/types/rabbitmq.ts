@@ -1,7 +1,7 @@
 // rabbitmq.dto.ts
 export interface ScrapedPostMessage {
   topicId: string;             // UUID topic (Lấy từ DB qua API hoặc cấu hình tĩnh tạm thời)
-  trackerId?: string;          // uuid of source scraping
+  trackerId: string;          // uuid of source scraping
   platform: 'FACEBOOK_GROUP' | 'FACEBOOK_PAGE';
   contentType: 'POST' | 'COMMENT';
   

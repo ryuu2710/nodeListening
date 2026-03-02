@@ -64,7 +64,7 @@ class RabbitMQService {
         timestamp: Date.now()
       });
     } catch (error) {
-      logger.error('❌ Lỗi khi gửi cập nhật Tracker:', error as any);
+      logger.error('❌ Error update Tracker:', error as any);
       return false;
     }
   }

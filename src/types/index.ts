@@ -156,6 +156,8 @@ export interface ScrapeRequest {
 export interface ScrapeGroupRequest {
   groupURL: string;
   numberOfPosts: number | 25;
+  trackerId: string;
+  topicId: string;
 }
 
 export interface ScrapePerformanceContextParams {

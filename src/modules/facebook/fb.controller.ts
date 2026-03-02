@@ -138,9 +138,7 @@ export default class FbController implements BaseController {
     res: Response,
     next: NextFunction,
   ): Promise<void> => {
-    const { projectId } = req.params;
-    const { groupURL, numberOfPosts } = req.body as ScrapeGroupRequest;
-    // const token: string = getTokenFromRequest(req)
+    const { groupURL, numberOfPosts, topicId, trackerId } = req.body as ScrapeGroupRequest;
 
     if (!groupURL) {
       res.status(400).json({ message: "Lack of parameter 'groupURL'" });
@@ -149,20 +147,26 @@ export default class FbController implements BaseController {
 
     try {
       logger.info(`Receive scraping requirement for group: ${groupURL}`);
-      const cleanedPosts: SocialFbMention[] = await this.fbScraperService.scrapeGroupPostsFromDiscussionFeed(groupURL, numberOfPosts)
-
-      res.status(200).json({
-        message: `Successfully collect ${cleanedPosts.length} posts from group ${groupURL}.`,
-        count: cleanedPosts.length,
-        cleanedPosts,
+      res.status(202).json({
+        message: `Scraping job accepted for group ${groupURL}. Running in background.`,
+        status: "processing"
       });
+
+      // background tasks
+      this.fbScraperService.scrapeGroupPostsFromDiscussionFeed(groupURL, numberOfPosts, topicId, trackerId)
+        .then((cleanedPosts) => {
+           logger.info(`✅ Successfully collected ${cleanedPosts.length} posts from group ${groupURL}.`);
+        })
+        .catch((error) => {
+           // Nếu cào xịt thì ghi log lại, không làm crash server
+           logger.error(`❌ Error during background scraping for ${groupURL}:`, error);
+        });
+
     } catch (error) {
-      console.error(
-        "Error for request process handling during scraping:",
-        error,
-      );
+      // Catch này chỉ bắt lỗi nếu đoạn code chuẩn bị ở trên (trước BƯỚC 2) có vấn đề
+      logger.error("Error for request process handling during scraping:", error as any);
       res.status(500).json({
-        message: "Occured unexpected error during scraping.",
+        message: "Occured unexpected error during scraping trigger.",
         error: error instanceof Error ? error.message : String(error),
       });
     }
